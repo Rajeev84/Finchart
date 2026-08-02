@@ -103,7 +103,7 @@ class DrawingTool(ABC):
         self.state = state
 
     @abstractmethod
-    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine) -> bool:
+    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> bool:
         """Check if point (px, py) hits the drawing shape or handles."""
         pass
 

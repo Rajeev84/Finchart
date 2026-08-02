@@ -65,7 +65,20 @@ class SelectionManager:
         if self._drag_mode == "endpoint":
             return {"mode": "endpoint", "handle": self._drag_handle, "new_index": index, "new_price": price}
         elif self._drag_mode == "whole":
-            return {"mode": "whole", "d_index": index - self._drag_start_index, "d_price": price - self._drag_start_price}
+            # Calculate pixel deltas and convert to index/price deltas
+            d_pixel_x = x - self._drag_start_x
+            d_pixel_y = y - self._drag_start_y
+            
+            # For whole shape drag, we need to convert pixel movement to index/price movement
+            # This requires access to coordinate engine, so we'll pass raw pixel deltas
+            # and let the controller handle the conversion
+            return {
+                "mode": "whole", 
+                "d_pixel_x": d_pixel_x, 
+                "d_pixel_y": d_pixel_y,
+                "d_index": index - self._drag_start_index, 
+                "d_price": price - self._drag_start_price
+            }
         return {}
 
     def end_drag(self) -> None:

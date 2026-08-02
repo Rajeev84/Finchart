@@ -17,15 +17,16 @@ from .base import DrawingTool, DrawingState
 class TrendLine(DrawingTool):
     """Interactive trend line shape between two price/time anchor points."""
 
-    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine) -> bool:
+    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> bool:
         if len(self.state.points) < 2 or self.state.locked:
             return False
 
+        vp = viewport or coord_engine.viewport
         (i1, p1), (i2, p2) = self.state.points[:2]
         x1 = coord_engine.index_to_x(float(i1))
-        y1 = coord_engine.price_to_y(float(p1))
+        y1 = coord_engine.price_to_y(float(p1), vp)
         x2 = coord_engine.index_to_x(float(i2))
-        y2 = coord_engine.price_to_y(float(p2))
+        y2 = coord_engine.price_to_y(float(p2), vp)
 
         # Wider tolerance when hovered/selected
         tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
@@ -34,18 +35,20 @@ class TrendLine(DrawingTool):
     def get_handles(self, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> List[Tuple[float, float, str]]:
         if len(self.state.points) < 2:
             return []
+        vp = viewport or coord_engine.viewport
         (i1, p1), (i2, p2) = self.state.points[:2]
         return [
-            (coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1)), "p1"),
-            (coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2)), "p2"),
+            (coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1), vp), "p1"),
+            (coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2), vp), "p2"),
         ]
 
-    def compute_angle(self, coord_engine: CoordinateEngine) -> Optional[float]:
+    def compute_angle(self, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> Optional[float]:
         if len(self.state.points) < 2:
             return None
+        vp = viewport or coord_engine.viewport
         (i1, p1), (i2, p2) = self.state.points[:2]
-        x1, y1 = coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1))
-        x2, y2 = coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2))
+        x1, y1 = coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1), vp)
+        x2, y2 = coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2), vp)
         # Canvas Y increases downward, so invert dy for geometric angle
         angle_rad = math.atan2(-(y2 - y1), x2 - x1)
         angle_deg = math.degrees(angle_rad)
@@ -154,7 +157,7 @@ class TrendLine(DrawingTool):
             ))
 
             # Angle text above x2,y2
-            angle = self.compute_angle(coord_engine)
+            angle = self.compute_angle(coord_engine, viewport)
             if angle is not None:
                 cmds.append(DrawCommand(
                     layer=Layer.DRAWING,
@@ -176,13 +179,14 @@ class TrendLine(DrawingTool):
 class HorizontalLine(DrawingTool):
     """Horizontal price level line spanning full chart width."""
 
-    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine) -> bool:
+    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> bool:
         if not self.state.points or self.state.locked:
             return False
         _, price = self.state.points[0]
         if price is None:
             return False
-        y = coord_engine.price_to_y(float(price))
+        vp = viewport or coord_engine.viewport
+        y = coord_engine.price_to_y(float(price), vp)
         tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
         return abs(py - y) <= tol
 
@@ -260,7 +264,7 @@ class HorizontalLine(DrawingTool):
 class VerticalLine(DrawingTool):
     """Vertical bar index line spanning full chart height."""
 
-    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine) -> bool:
+    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> bool:
         if not self.state.points or self.state.locked:
             return False
         idx, _ = self.state.points[0]
@@ -353,7 +357,7 @@ class AngleLine(TrendLine):
             (i1, p1), (i2, p2) = self.state.points[:2]
             x2 = coord_engine.index_to_x(float(i2))
             y2 = coord_engine.price_to_y(float(p2), viewport or coord_engine.viewport)
-            angle = self.compute_angle(coord_engine)
+            angle = self.compute_angle(coord_engine, viewport)
             if angle is not None:
                 cmds.append(DrawCommand(
                     layer=Layer.DRAWING,
@@ -374,15 +378,16 @@ class AngleLine(TrendLine):
 class Rectangle(DrawingTool):
     """Interactive rectangle defined by two corner price/time anchor points."""
 
-    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine) -> bool:
+    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> bool:
         if len(self.state.points) < 2 or self.state.locked:
             return False
 
+        vp = viewport or coord_engine.viewport
         (idx1, p1), (idx2, p2) = self.state.points[:2]
         x1 = coord_engine.index_to_x(float(idx1))
-        y1 = coord_engine.price_to_y(float(p1))
+        y1 = coord_engine.price_to_y(float(p1), vp)
         x2 = coord_engine.index_to_x(float(idx2))
-        y2 = coord_engine.price_to_y(float(p2))
+        y2 = coord_engine.price_to_y(float(p2), vp)
 
         # Test edge hit (border)
         tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
@@ -453,9 +458,31 @@ class Rectangle(DrawingTool):
         width = self.state.width + (1.0 if self.state.selected else 0.0)
 
         # Fill color with transparency support
-        fill_color = self.state.fill.to_hex() if self.state.fill else ""
-        # Use stipple pattern for transparency effect when fill is set
-        fill_stipple = "gray25" if self.state.fill else ""
+        if self.state.fill:
+            # Use stipple pattern for transparency effect instead of color blending
+            # This provides better visibility than blending with dark background
+            fill_rgb = self.state.fill
+            fill_color = fill_rgb.to_hex()
+            
+            # Use stipple patterns based on alpha value
+            alpha = fill_rgb.a if fill_rgb.a is not None else 0.3
+            if alpha >= 0.7:
+                # For solid fill, don't set stipple at all
+                fill_stipple = None
+            elif alpha >= 0.5:
+                fill_stipple = "gray12"  # Light stipple
+            elif alpha >= 0.3:
+                fill_stipple = "gray25"  # Medium stipple
+            else:
+                fill_stipple = "gray50"  # Heavy stipple for low opacity
+        else:
+            fill_color = ""
+            fill_stipple = None
+
+        # Build options dict, only include stipple if needed
+        rect_options = {"outline": color, "fill": fill_color, "width": width}
+        if fill_stipple is not None:
+            rect_options["stipple"] = fill_stipple
 
         cmds: List[DrawCommand] = []
         cmds.append(DrawCommand(
@@ -463,7 +490,7 @@ class Rectangle(DrawingTool):
             tag=f"rect_{self.state.id}",
             item_type="rectangle",
             coords=(min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)),
-            options={"outline": color, "fill": fill_color, "width": width, "stipple": fill_stipple},
+            options=rect_options,
             z_index=5
         ))
 

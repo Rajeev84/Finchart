@@ -68,7 +68,8 @@ class InteractionController:
 
         x, y = event.x, event.y
         index = self._coord.x_to_index(x)
-        price = self._coord.y_to_price(y, self._coord.viewport)
+        chart_vp = self._widget._grid_renderer.get_chart_viewport() if self._widget else self._coord.viewport
+        price = self._coord.y_to_price(y, chart_vp)
 
         # Drawing tool integration
         if self._widget and self._widget._tool_context:
@@ -175,12 +176,12 @@ class InteractionController:
         if self._widget and self._widget._selection_manager.selected_id:
             tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
             if tool:
-                handles = tool.get_handles(self._coord)
+                handles = tool.get_handles(self._coord, chart_vp)
                 for hx, hy, hid in handles:
-                    if is_point_near_handle(x, y, hx, hy, tolerance=8):
+                    if is_point_near_handle(x, y, hx, hy, size=8):
                         self._widget._selection_manager.start_drag("endpoint", hid, x, y, index, price)
                         return
-                if tool.hit_test(x, y, self._coord):
+                if tool.hit_test(x, y, self._coord, chart_vp):
                     self._widget._selection_manager.start_drag("whole", None, x, y, index, price)
                     return
 
@@ -188,7 +189,7 @@ class InteractionController:
         if self._widget and not self._widget._tool_context:
             clicked_id = None
             for sid, tool in reversed(list(self._widget._drawing_tools.items())):
-                if tool.hit_test(x, y, self._coord):
+                if tool.hit_test(x, y, self._coord, chart_vp):
                     clicked_id = sid
                     break
 
@@ -214,7 +215,8 @@ class InteractionController:
         """Handle mouse motion while button 1 is pressed (Pan)."""
         x, y = event.x, event.y
         index = self._coord.x_to_index(x)
-        price = self._coord.y_to_price(y, self._coord.viewport)
+        chart_vp = self._widget._grid_renderer.get_chart_viewport() if self._widget else self._coord.viewport
+        price = self._coord.y_to_price(y, chart_vp)
 
         # Drawing tool drag mode
         if self._widget and self._widget._selection_manager.drag_mode:
@@ -224,7 +226,16 @@ class InteractionController:
                 if delta["mode"] == "endpoint":
                     tool.move_endpoint(delta["handle"], delta["new_index"], delta["new_price"])
                 elif delta["mode"] == "whole":
-                    tool.move_whole(delta["d_index"], delta["d_price"])
+                    # Convert pixel deltas to index/price deltas for smooth movement
+                    chart_vp = self._widget._grid_renderer.get_chart_viewport()
+                    d_index = delta["d_pixel_x"] / self._coord.time_scale.bar_spacing if self._coord.time_scale.bar_spacing > 0 else 0
+                    
+                    # Convert Y pixel delta to price delta using chart viewport
+                    y1 = self._coord.y_to_price(self._widget._selection_manager._drag_start_y, chart_vp)
+                    y2 = self._coord.y_to_price(self._widget._selection_manager._drag_start_y + delta["d_pixel_y"], chart_vp)
+                    d_price = y2 - y1
+                    
+                    tool.move_whole(d_index, d_price)
                 self._widget._pipeline.force_full_redraw()
                 self._widget._request_render()
             self._event_bus.emit_new(EventType.MOUSE_MOVE, self, x=event.x, y=event.y, dragging=True)
@@ -253,7 +264,8 @@ class InteractionController:
         """Handle mouse motion across canvas."""
         x, y = event.x, event.y
         index = self._coord.x_to_index(x)
-        price = self._coord.y_to_price(y, self._coord.viewport)
+        chart_vp = self._widget._grid_renderer.get_chart_viewport() if self._widget else self._coord.viewport
+        price = self._coord.y_to_price(y, chart_vp)
 
         # Update preview shape during drawing
         if self._widget and self._widget._tool_context and self._widget._tool_context.state == ToolState.PREVIEW:
