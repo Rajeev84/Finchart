@@ -10,6 +10,8 @@ from typing import Optional, Callable, Any
 
 from ..core.events import EventBus, EventType
 from ..coordinates.engine import CoordinateEngine
+from ..interaction.hit_test import is_point_near_handle
+from ..interaction.tool_state import ToolState
 
 
 class InteractionController:
@@ -25,7 +27,14 @@ class InteractionController:
         self._drag_start_offset = 0.0
         self._panning_enabled = True
 
+        # Drawing tool integration
+        self._widget: Optional[Any] = None  # ChartWidget reference
+
         self._bind_events()
+
+    def set_widget(self, widget: Any) -> None:
+        """Set reference to ChartWidget for drawing tool integration."""
+        self._widget = widget
 
     @property
     def panning_enabled(self) -> bool:
@@ -43,6 +52,7 @@ class InteractionController:
         c.bind("<ButtonRelease-1>", self._on_mouse_up)
         c.bind("<Motion>", self._on_mouse_move)
         c.bind("<Leave>", self._on_mouse_leave)
+        c.bind("<Button-3>", self._on_right_click)  # Right-click cancel
 
         # Mouse wheel (Windows, macOS, Linux)
         c.bind("<MouseWheel>", self._on_mouse_wheel)
@@ -55,6 +65,143 @@ class InteractionController:
     def _on_mouse_down(self, event: tk.Event) -> None:
         """Handle mouse press: request canvas focus and initialize drag tracking."""
         self._canvas.focus_set()
+
+        x, y = event.x, event.y
+        index = self._coord.x_to_index(x)
+        price = self._coord.y_to_price(y, self._coord.viewport)
+
+        # Drawing tool integration
+        if self._widget and self._widget._tool_context:
+            ctx = self._widget._tool_context
+            if ctx.state == ToolState.WAIT_FIRST_CLICK:
+                # HLine and VLine are single-click tools
+                if ctx.tool_type == "hline":
+                    from ..drawing.base import DrawingState
+                    from ..core.types import Color
+                    import uuid
+                    state = DrawingState(
+                        id=uuid.uuid4().hex,
+                        tool_type="hline",
+                        points=[(None, price)],
+                        color=Color(255, 165, 0),
+                        width=2.0,
+                        style="solid"
+                    )
+                    self._widget.add_drawing(state)
+                    self._widget.deactivate_tool()
+                    return
+                elif ctx.tool_type == "vline":
+                    from ..drawing.base import DrawingState
+                    from ..core.types import Color
+                    import uuid
+                    state = DrawingState(
+                        id=uuid.uuid4().hex,
+                        tool_type="vline",
+                        points=[(index, None)],
+                        color=Color(255, 165, 0),
+                        width=2.0,
+                        style="solid"
+                    )
+                    self._widget.add_drawing(state)
+                    self._widget.deactivate_tool()
+                    return
+
+                # Two-click tools (TrendLine, AngleLine, Rectangle)
+                ctx.start_index = index
+                ctx.start_price = price
+                ctx.current_index = index
+                ctx.current_price = price
+                ctx.state = ToolState.PREVIEW
+                # Create preview shape
+                from ..drawing.base import DrawingState
+                from ..core.types import Color
+                import math
+
+                points = []
+                if ctx.tool_type == "angleline":
+                    # For angleline, calculate second point based on 45-degree angle
+                    # Use a fixed distance for preview
+                    dx = 20.0  # index distance
+                    dy = dx * math.tan(math.radians(45))  # price change at 45 degrees
+                    # Invert dy because canvas Y increases downward
+                    points = [(index, price), (index + dx, price - dy)]
+                else:
+                    points = [(index, price), (index, price)]  # Start and end same initially
+
+                preview_state = DrawingState(
+                    id="preview",
+                    tool_type=ctx.tool_type,
+                    points=points,
+                    color=Color(255, 165, 0),
+                    width=2.0,
+                    style="solid",
+                    visible=True
+                )
+                ctx.preview_shape = preview_state
+                ctx.preview_tool = self._widget._create_tool(preview_state)
+                self._widget._pipeline.force_full_redraw()
+                self._widget._request_render()
+                return
+            elif ctx.state == ToolState.PREVIEW:
+                # Finalize drawing
+                from ..drawing.base import DrawingState
+                from ..core.types import Color
+                import uuid
+                import math
+
+                points = []
+                if ctx.tool_type == "angleline":
+                    # Calculate y2 based on 45-degree angle from first point
+                    dx = index - ctx.start_index
+                    dy = dx * math.tan(math.radians(45))
+                    # Invert dy for canvas coordinates
+                    points = [(ctx.start_index, ctx.start_price), (index, ctx.start_price - dy)]
+                else:
+                    points = [(ctx.start_index, ctx.start_price), (index, price)]
+
+                state = DrawingState(
+                    id=uuid.uuid4().hex,
+                    tool_type=ctx.tool_type,
+                    points=points,
+                    color=Color(255, 165, 0),
+                    width=2.0,
+                    style="solid"
+                )
+                self._widget.add_drawing(state)
+                self._widget.deactivate_tool()
+                return
+
+        # Normal mode: check for handle/line hit
+        if self._widget and self._widget._selection_manager.selected_id:
+            tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
+            if tool:
+                handles = tool.get_handles(self._coord)
+                for hx, hy, hid in handles:
+                    if is_point_near_handle(x, y, hx, hy, tolerance=8):
+                        self._widget._selection_manager.start_drag("endpoint", hid, x, y, index, price)
+                        return
+                if tool.hit_test(x, y, self._coord):
+                    self._widget._selection_manager.start_drag("whole", None, x, y, index, price)
+                    return
+
+        # Click on empty canvas: try to select a shape
+        if self._widget and not self._widget._tool_context:
+            clicked_id = None
+            for sid, tool in reversed(list(self._widget._drawing_tools.items())):
+                if tool.hit_test(x, y, self._coord):
+                    clicked_id = sid
+                    break
+
+            if clicked_id:
+                self._widget._selection_manager.select(clicked_id)
+                # Don't start panning when selecting a shape
+                self._is_dragging = False
+                self._canvas.configure(cursor="")
+                return
+            else:
+                self._widget._selection_manager.unselect()
+
+        # Normal panning
         if self._panning_enabled:
             self._is_dragging = True
             self._drag_start_x = event.x
@@ -65,6 +212,25 @@ class InteractionController:
 
     def _on_mouse_drag(self, event: tk.Event) -> None:
         """Handle mouse motion while button 1 is pressed (Pan)."""
+        x, y = event.x, event.y
+        index = self._coord.x_to_index(x)
+        price = self._coord.y_to_price(y, self._coord.viewport)
+
+        # Drawing tool drag mode
+        if self._widget and self._widget._selection_manager.drag_mode:
+            delta = self._widget._selection_manager.update_drag(x, y, index, price)
+            tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
+            if tool:
+                if delta["mode"] == "endpoint":
+                    tool.move_endpoint(delta["handle"], delta["new_index"], delta["new_price"])
+                elif delta["mode"] == "whole":
+                    tool.move_whole(delta["d_index"], delta["d_price"])
+                self._widget._pipeline.force_full_redraw()
+                self._widget._request_render()
+            self._event_bus.emit_new(EventType.MOUSE_MOVE, self, x=event.x, y=event.y, dragging=True)
+            return
+
+        # Normal panning
         if self._is_dragging and self._panning_enabled:
             delta_x = event.x - self._drag_start_x
             self._coord.time_scale.offset = self._drag_start_offset + delta_x
@@ -76,10 +242,44 @@ class InteractionController:
         """Handle mouse button release."""
         self._is_dragging = False
         self._canvas.configure(cursor="")
+
+        # End drawing tool drag
+        if self._widget and self._widget._selection_manager.drag_mode:
+            self._widget._selection_manager.end_drag()
+
         self._event_bus.emit_new(EventType.MOUSE_UP, self, x=event.x, y=event.y)
 
     def _on_mouse_move(self, event: tk.Event) -> None:
         """Handle mouse motion across canvas."""
+        x, y = event.x, event.y
+        index = self._coord.x_to_index(x)
+        price = self._coord.y_to_price(y, self._coord.viewport)
+
+        # Update preview shape during drawing
+        if self._widget and self._widget._tool_context and self._widget._tool_context.state == ToolState.PREVIEW:
+            ctx = self._widget._tool_context
+            ctx.current_index = index
+            ctx.current_price = price
+
+            if ctx.preview_tool and ctx.preview_shape:
+                import math
+                if ctx.tool_type == "hline":
+                    ctx.preview_shape.points = [(None, price)]
+                elif ctx.tool_type == "vline":
+                    ctx.preview_shape.points = [(index, None)]
+                elif ctx.tool_type == "angleline":
+                    # For angleline, calculate second point based on 45-degree angle from first point
+                    dx = index - ctx.start_index
+                    dy = dx * math.tan(math.radians(45))
+                    # Invert dy for canvas coordinates
+                    ctx.preview_shape.points = [(ctx.start_index, ctx.start_price), (index, ctx.start_price - dy)]
+                else:
+                    ctx.preview_shape.points = [(ctx.start_index, ctx.start_price), (index, price)]
+
+                self._widget._pipeline.force_full_redraw()
+                self._widget._request_render()
+                return
+
         if not self._is_dragging:
             self._event_bus.emit_new(EventType.MOUSE_MOVE, self, x=event.x, y=event.y, dragging=False)
 
@@ -90,6 +290,11 @@ class InteractionController:
         self._event_bus.emit_new(
             EventType.MOUSE_MOVE, self, x=-1.0, y=-1.0, dragging=False, leave=True
         )
+
+    def _on_right_click(self, event: tk.Event) -> None:
+        """Handle right-click to cancel drawing tool."""
+        if self._widget and self._widget._tool_context:
+            self._widget.deactivate_tool()
 
     def _on_mouse_wheel(self, event: tk.Event) -> None:
         """Handle mouse wheel zoom centered around mouse cursor X position."""
@@ -106,5 +311,13 @@ class InteractionController:
 
     def _on_key_press(self, event: tk.Event) -> None:
         """Handle keyboard shortcuts."""
-        keysym = getattr(event, "keysym", "")
+        keysym = event.keysym.lower()
+        if keysym == "escape":
+            # Cancel drawing tool if active
+            if self._widget and self._widget._tool_context:
+                self._widget.deactivate_tool()
+            else:
+                # Reset time scale offset
+                self._coord.time_scale.offset = 0.0
+                self._event_bus.emit_new(EventType.SCALE_CHANGED, self, offset=0.0)
         self._event_bus.emit_new(EventType.KEY_DOWN, self, keysym=keysym, char=getattr(event, "char", ""))

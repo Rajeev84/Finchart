@@ -25,8 +25,11 @@ from ..rendering.series import SeriesRenderer, SeriesStyle
 from ..rendering.grid import GridRenderer, GridStyle
 from ..rendering.crosshair import CrosshairRenderer, CrosshairStyle, PaneBadge
 from ..interaction.controller import InteractionController
+from ..interaction.selection_manager import SelectionManager
+from ..interaction.tool_state import ToolContext, ToolState
 from ..indicators.base import Indicator
-from ..drawing.tools import DrawingTool, DrawingState, MarketProfileOverlay
+from ..drawing.tools import TrendLine, HorizontalLine, VerticalLine, AngleLine, Rectangle, MarketProfileOverlay
+from ..drawing.base import DrawingState
 from ..themes.style import Theme, DarkTheme, LightTheme
 
 
@@ -119,12 +122,18 @@ class ChartWidget(tk.Frame):
             self._coord_engine,
             self._event_bus
         )
+        self._interaction_controller.set_widget(self)
 
         # Indicators & Drawing tools
         self._indicators: List[Indicator] = []
         self._drawings: Dict[str, DrawingState] = {}
+        self._drawing_tools: Dict[str, Any] = {}  # id -> DrawingTool instance
         self._selected_drawing_tags: set[str] = set()
         self._market_profile = MarketProfileOverlay()
+
+        # Drawing tool state management
+        self._selection_manager = SelectionManager(self._event_bus)
+        self._tool_context: Optional[ToolContext] = None
 
         # Configuration Flags
         self._auto_scale = True
@@ -301,17 +310,70 @@ class ChartWidget(tk.Frame):
             with open(filepath, "r") as f:
                 state = json.load(f)
             self._drawings = {}
+            self._drawing_tools = {}
             for tag, d_data in state.get("drawings", {}).items():
-                self._drawings[tag] = DrawingState(
-                    tag=tag,
-                    tool_type=d_data.get("tool_type", "line"),
-                    points=d_data.get("points", []),
-                    color=Color.from_hex(d_data.get("color", "#FFA500")),
-                    width=d_data.get("width", 2.0)
-                )
+                drawing_state = DrawingState.from_dict(d_data)
+                self._drawings[drawing_state.id] = drawing_state
+                tool = self._create_tool(drawing_state)
+                self._drawing_tools[drawing_state.id] = tool
             self._request_render()
         except Exception:
             pass
+
+    # --- Drawing Tool Public API ---
+
+    def add_drawing(self, state: DrawingState) -> Any:
+        """Add a finalized drawing shape to the chart."""
+        tool = self._create_tool(state)
+        self._drawing_tools[state.id] = tool
+        self._drawings[state.id] = state
+        self._pipeline.force_full_redraw()
+        self._request_render()
+        return tool
+
+    def remove_drawing(self, shape_id: str) -> None:
+        """Remove a drawing by ID."""
+        if shape_id in self._drawing_tools:
+            del self._drawing_tools[shape_id]
+            del self._drawings[shape_id]
+            if self._selection_manager.selected_id == shape_id:
+                self._selection_manager.unselect()
+            self._pipeline.force_full_redraw()
+            self._request_render()
+
+    def clear_drawings(self) -> None:
+        """Remove all drawings."""
+        self._drawing_tools.clear()
+        self._drawings.clear()
+        self._selection_manager.unselect()
+        self._pipeline.force_full_redraw()
+        self._request_render()
+
+    def set_active_tool(self, tool_type: str) -> None:
+        """Activate a drawing tool for creation mode."""
+        self._tool_context = ToolContext(tool_type=tool_type, state=ToolState.WAIT_FIRST_CLICK)
+        # Change cursor to crosshair
+        self._canvas.config(cursor="crosshair")
+
+    def deactivate_tool(self) -> None:
+        """Cancel active tool and return to normal mode."""
+        self._tool_context = None
+        self._canvas.config(cursor="")
+        self._pipeline.force_full_redraw()
+        self._request_render()
+
+    # --- Internal Drawing Tool Helpers ---
+
+    def _create_tool(self, state: DrawingState) -> Any:
+        mapping = {
+            "trendline": TrendLine,
+            "hline": HorizontalLine,
+            "vline": VerticalLine,
+            "angleline": AngleLine,
+            "rectangle": Rectangle,
+        }
+        cls = mapping.get(state.tool_type, TrendLine)
+        return cls(state)
 
     # ==================== Internal Subsystem Routing ====================
 
@@ -323,6 +385,8 @@ class ChartWidget(tk.Frame):
         eb.subscribe(EventType.MOUSE_MOVE, self._on_mouse_move_event)
         eb.subscribe(EventType.SCALE_CHANGED, self._on_scale_changed_event)
         eb.subscribe(EventType.DATA_CHANGED, self._on_data_changed_event)
+        eb.subscribe(EventType.SELECTION_CHANGED, self._on_selection_changed)
+        eb.subscribe(EventType.HOVER_CHANGED, self._on_hover_changed)
 
     def _on_resize(self, event: tk.Event) -> None:
         """Handle widget resize event."""
@@ -379,6 +443,22 @@ class ChartWidget(tk.Frame):
         # are handled by their respective methods to avoid double rendering
         if action == "set":
             self._request_render()
+
+    def _on_selection_changed(self, event: Event) -> None:
+        """Handle selection changed events."""
+        new_id = event.data.get("new")
+        for sid, state in self._drawings.items():
+            state.selected = (sid == new_id)
+        self._pipeline.force_full_redraw()
+        self._request_render()
+
+    def _on_hover_changed(self, event: Event) -> None:
+        """Handle hover changed events."""
+        hid = event.data.get("id")
+        for sid, state in self._drawings.items():
+            state.hovered = (sid == hid)
+        self._pipeline.force_full_redraw()
+        self._request_render()
 
     def _update_viewport(self) -> None:
         """Synchronize coordinate engine viewport with canvas dimensions."""
@@ -503,10 +583,29 @@ class ChartWidget(tk.Frame):
                 self._grid_renderer.render(self._data_store.data, pane_name=pane_name)
                 self._render_indicators(pane_vp, pane_name)
 
+        # Render all drawings
+        for tool in self._drawing_tools.values():
+            if not tool.state.visible:
+                continue
+            pane_vp = chart_vp if tool.state.pane_name == "candlestick" else self._coord_engine.get_pane_viewport(tool.state.pane_name)
+            cmds = tool.render_commands(self._coord_engine, pane_vp)
+            self._pipeline.add_commands(cmds)
+
+        # Render preview shape during drawing tool creation
+        if self._tool_context and self._tool_context.preview_tool and self._tool_context.preview_shape:
+            preview_tool = self._tool_context.preview_tool
+            if preview_tool.state.visible:
+                cmds = preview_tool.render_commands(self._coord_engine, chart_vp)
+                self._pipeline.add_commands(cmds)
+
+        self._pipeline.schedule_layer(Layer.DRAWING)
+
         # Crosshair rendered last (overlay on top of everything)
-        self._update_crosshair_badges()
-        self._crosshair_renderer.render(chart_vp)
-        self._pipeline.schedule_layer(Layer.CROSSHAIR)
+        # Hide crosshair during drawing tool activation
+        if not self._tool_context or self._tool_context.state == ToolState.IDLE:
+            self._update_crosshair_badges()
+            self._crosshair_renderer.render(chart_vp)
+            self._pipeline.schedule_layer(Layer.CROSSHAIR)
         # Incremental layer update + pool option reset keeps axes stable while
         # pan/stream rebuild series/grid/indicators without full canvas wipe.
         self._pipeline.schedule_render(full_redraw=False)
