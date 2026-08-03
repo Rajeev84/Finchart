@@ -85,6 +85,12 @@ class CoordinateEngine:
         if pane_name not in self._price_scales:
             self._price_scales[pane_name] = PriceScale()
         ps = self._price_scales[pane_name]
+        
+        # Enforce fixed_range if set (e.g., RSI 0-100)
+        if ps.fixed_range:
+            min_price = max(min_price, 0.0)  # Ensure minimum doesn't go below 0
+            max_price = min(max_price, 100.0)  # Ensure maximum doesn't go above 100
+        
         rng = max_price - min_price
         if rng <= 0:
             rng = 1.0

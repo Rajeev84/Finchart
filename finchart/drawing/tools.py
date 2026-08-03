@@ -24,9 +24,9 @@ class TrendLine(DrawingTool):
         vp = viewport or coord_engine.viewport
         (i1, p1), (i2, p2) = self.state.points[:2]
         x1 = coord_engine.index_to_x(float(i1))
-        y1 = coord_engine.price_to_y(float(p1), vp)
+        y1 = coord_engine.price_to_y(float(p1), vp, self.state.pane_name)
         x2 = coord_engine.index_to_x(float(i2))
-        y2 = coord_engine.price_to_y(float(p2), vp)
+        y2 = coord_engine.price_to_y(float(p2), vp, self.state.pane_name)
 
         # Wider tolerance when hovered/selected
         tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
@@ -38,8 +38,8 @@ class TrendLine(DrawingTool):
         vp = viewport or coord_engine.viewport
         (i1, p1), (i2, p2) = self.state.points[:2]
         return [
-            (coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1), vp), "p1"),
-            (coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2), vp), "p2"),
+            (coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1), vp, self.state.pane_name), "p1"),
+            (coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2), vp, self.state.pane_name), "p2"),
         ]
 
     def compute_angle(self, coord_engine: CoordinateEngine, viewport: Optional[Any] = None) -> Optional[float]:
@@ -47,8 +47,8 @@ class TrendLine(DrawingTool):
             return None
         vp = viewport or coord_engine.viewport
         (i1, p1), (i2, p2) = self.state.points[:2]
-        x1, y1 = coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1), vp)
-        x2, y2 = coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2), vp)
+        x1, y1 = coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1), vp, self.state.pane_name)
+        x2, y2 = coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2), vp, self.state.pane_name)
 
         # Always read left-to-right so the sign is consistent regardless
         # of which handle the user is dragging.
@@ -88,9 +88,9 @@ class TrendLine(DrawingTool):
         vp = viewport or coord_engine.viewport
         (i1, p1), (i2, p2) = self.state.points[:2]
         x1 = coord_engine.index_to_x(float(i1))
-        y1 = coord_engine.price_to_y(float(p1), vp)
+        y1 = coord_engine.price_to_y(float(p1), vp, self.state.pane_name)
         x2 = coord_engine.index_to_x(float(i2))
-        y2 = coord_engine.price_to_y(float(p2), vp)
+        y2 = coord_engine.price_to_y(float(p2), vp, self.state.pane_name)
 
         # Appearance based on state
         color = self.state.color.to_hex()
@@ -198,7 +198,7 @@ class HorizontalLine(DrawingTool):
         if price is None:
             return False
         vp = viewport or coord_engine.viewport
-        y = coord_engine.price_to_y(float(price), vp)
+        y = coord_engine.price_to_y(float(price), vp, self.state.pane_name)
         tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
         return abs(py - y) <= tol
 
@@ -209,7 +209,7 @@ class HorizontalLine(DrawingTool):
         if price is None:
             return []
         vp = viewport or coord_engine.viewport
-        y = coord_engine.price_to_y(float(price), vp)
+        y = coord_engine.price_to_y(float(price), vp, self.state.pane_name)
         return [(vp.center_x, y, "mid")]
 
     def move_endpoint(self, handle_id: str, new_index: float, new_price: float) -> None:
@@ -227,7 +227,7 @@ class HorizontalLine(DrawingTool):
         _, price = self.state.points[0]
         if price is None:
             return []
-        y = coord_engine.price_to_y(float(price), vp)
+        y = coord_engine.price_to_y(float(price), vp, self.state.pane_name)
 
         color = self.state.color.to_hex()
         if self.state.selected:
@@ -368,7 +368,7 @@ class AngleLine(TrendLine):
         if len(self.state.points) >= 2 and self.state.visible:
             (i1, p1), (i2, p2) = self.state.points[:2]
             x2 = coord_engine.index_to_x(float(i2))
-            y2 = coord_engine.price_to_y(float(p2), viewport or coord_engine.viewport)
+            y2 = coord_engine.price_to_y(float(p2), viewport or coord_engine.viewport, self.state.pane_name)
             angle = self.compute_angle(coord_engine, viewport)
             if angle is not None:
                 cmds.append(DrawCommand(
@@ -397,9 +397,9 @@ class Rectangle(DrawingTool):
         vp = viewport or coord_engine.viewport
         (idx1, p1), (idx2, p2) = self.state.points[:2]
         x1 = coord_engine.index_to_x(float(idx1))
-        y1 = coord_engine.price_to_y(float(p1), vp)
+        y1 = coord_engine.price_to_y(float(p1), vp, self.state.pane_name)
         x2 = coord_engine.index_to_x(float(idx2))
-        y2 = coord_engine.price_to_y(float(p2), vp)
+        y2 = coord_engine.price_to_y(float(p2), vp, self.state.pane_name)
 
         # 1) Interior hit — clicking anywhere inside the rectangle selects it
         if is_point_in_rect(px, py, x1, y1, x2, y2):
@@ -420,9 +420,9 @@ class Rectangle(DrawingTool):
         (i1, p1), (i2, p2) = self.state.points[:2]
         vp = viewport or coord_engine.viewport
         x1 = coord_engine.index_to_x(float(i1))
-        y1 = coord_engine.price_to_y(float(p1), vp)
+        y1 = coord_engine.price_to_y(float(p1), vp, self.state.pane_name)
         x2 = coord_engine.index_to_x(float(i2))
-        y2 = coord_engine.price_to_y(float(p2), vp)
+        y2 = coord_engine.price_to_y(float(p2), vp, self.state.pane_name)
         return [
             (x1, y1, "p1"),
             (x2, y1, "p2"),
@@ -470,9 +470,9 @@ class Rectangle(DrawingTool):
         (idx1, p1), (idx2, p2) = self.state.points[:2]
 
         x1 = coord_engine.index_to_x(float(idx1))
-        y1 = coord_engine.price_to_y(float(p1), vp)
+        y1 = coord_engine.price_to_y(float(p1), vp, self.state.pane_name)
         x2 = coord_engine.index_to_x(float(idx2))
-        y2 = coord_engine.price_to_y(float(p2), vp)
+        y2 = coord_engine.price_to_y(float(p2), vp, self.state.pane_name)
 
         color = self.state.color.to_hex()
         if self.state.selected:
@@ -717,7 +717,7 @@ class LongShort(DrawingTool):
 
         vp = viewport or coord_engine.viewport
         ex = coord_engine.index_to_x(self.entry_index)
-        ey = coord_engine.price_to_y(self.entry_price, vp)
+        ey = coord_engine.price_to_y(self.entry_price, vp, self.state.pane_name)
 
         # For preview states, handle missing points gracefully
         if len(self.state.points) >= 2:
@@ -726,12 +726,12 @@ class LongShort(DrawingTool):
             wx = ex
 
         if len(self.state.points) >= 2:
-            sy = coord_engine.price_to_y(self.stop_price, vp)
+            sy = coord_engine.price_to_y(self.stop_price, vp, self.state.pane_name)
         else:
             sy = ey
 
         if len(self.state.points) >= 3:
-            ty = coord_engine.price_to_y(self.target_price, vp)
+            ty = coord_engine.price_to_y(self.target_price, vp, self.state.pane_name)
         else:
             ty = ey
 
@@ -764,10 +764,10 @@ class LongShort(DrawingTool):
             return []
         vp = viewport or coord_engine.viewport
         ex = coord_engine.index_to_x(self.entry_index)
-        ey = coord_engine.price_to_y(self.entry_price, vp)
+        ey = coord_engine.price_to_y(self.entry_price, vp, self.state.pane_name)
         wx = coord_engine.index_to_x(self.width_index)
-        ty = coord_engine.price_to_y(self.target_price, vp)
-        sy = coord_engine.price_to_y(self.stop_price, vp)
+        ty = coord_engine.price_to_y(self.target_price, vp, self.state.pane_name)
+        sy = coord_engine.price_to_y(self.stop_price, vp, self.state.pane_name)
         return [
             (ex, ey, "entry"),      # left  — entry price / index
             (wx, ty, "target"),     # right — target level
@@ -818,10 +818,10 @@ class LongShort(DrawingTool):
 
         vp = viewport or coord_engine.viewport
         ex = coord_engine.index_to_x(self.entry_index)
-        ey = coord_engine.price_to_y(self.entry_price, vp)
+        ey = coord_engine.price_to_y(self.entry_price, vp, self.state.pane_name)
         wx = coord_engine.index_to_x(self.width_index)
-        ty = coord_engine.price_to_y(self.target_price, vp)
-        sy = coord_engine.price_to_y(self.stop_price, vp)
+        ty = coord_engine.price_to_y(self.target_price, vp, self.state.pane_name)
+        sy = coord_engine.price_to_y(self.stop_price, vp, self.state.pane_name)
 
         cmds: List[DrawCommand] = []
 
@@ -956,14 +956,14 @@ class LongShort(DrawingTool):
             z_index=6
         ))
 
-        # Target label (aligned to right edge of box)
+        # Target label (aligned to left edge of box)
         target_label = f"Target: {self.target_price:.2f} ({target_pnl:+.2f})"
         label_y = ty - 5 if self.is_long else ty + 15
         cmds.append(DrawCommand(
             layer=Layer.DRAWING,
             tag=f"target_label_{self.state.id}",
             item_type="text",
-            coords=(wx + 5, label_y),
+            coords=(ex + 5, label_y),
             options={
                 "text": target_label,
                 "fill": target_color,
@@ -973,14 +973,14 @@ class LongShort(DrawingTool):
             z_index=6
         ))
 
-        # Stop label (aligned to right edge of box)
+        # Stop label (aligned to left edge of box)
         stop_label = f"Stop: {self.stop_price:.2f} ({stop_pnl:+.2f})"
         label_y = sy + 15 if self.is_long else sy - 5
         cmds.append(DrawCommand(
             layer=Layer.DRAWING,
             tag=f"stop_label_{self.state.id}",
             item_type="text",
-            coords=(wx + 5, label_y),
+            coords=(ex + 5, label_y),
             options={
                 "text": stop_label,
                 "fill": stop_color,

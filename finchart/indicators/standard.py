@@ -197,9 +197,8 @@ class RSI(Indicator):
             val = self._rsi_values[i]
             if val is not None:
                 x = coord_engine.index_to_x(i)
-                # RSI 0-100 mapped to viewport height
-                ratio = (val - 0.0) / 100.0
-                y = vp.bottom - ratio * vp.height
+                # Use the coordinate engine's price_to_y with the RSI pane
+                y = coord_engine.price_to_y(val, vp, self.pane)
                 points.extend([x, y])
 
         if len(points) < 4:
@@ -318,29 +317,15 @@ class MACD(Indicator):
         vp = viewport or coord_engine.viewport
         cmds: List[DrawCommand] = []
 
-        # Use viewport center as zero line for MACD
-        zero_y = vp.center_y
-
-        # Determine Y scale from max absolute MACD value in visible range
-        max_abs = 0.0
-        for i in range(start_idx, min(end_idx, len(self._macd_line))):
-            v = self._macd_line[i]
-            if v is not None:
-                max_abs = max(max_abs, abs(v))
-        if max_abs < 1e-9:
-            return []
-
-        half_h = vp.height * 0.45
-
-        def val_to_y(val: float) -> float:
-            return zero_y - (val / max_abs) * half_h
+        # Use coordinate engine's price_to_y with the MACD pane
+        zero_y = coord_engine.price_to_y(0.0, vp, self.pane)
 
         # MACD line
         macd_pts = []
         for i in range(start_idx, min(end_idx, len(self._macd_line))):
             v = self._macd_line[i]
             if v is not None:
-                macd_pts.extend([coord_engine.index_to_x(i), val_to_y(v)])
+                macd_pts.extend([coord_engine.index_to_x(i), coord_engine.price_to_y(v, vp, self.pane)])
         if len(macd_pts) >= 4:
             cmds.append(DrawCommand(
                 layer=Layer.INDICATORS,
@@ -356,7 +341,7 @@ class MACD(Indicator):
         for i in range(start_idx, min(end_idx, len(self._signal_line))):
             v = self._signal_line[i]
             if v is not None:
-                sig_pts.extend([coord_engine.index_to_x(i), val_to_y(v)])
+                sig_pts.extend([coord_engine.index_to_x(i), coord_engine.price_to_y(v, vp, self.pane)])
         if len(sig_pts) >= 4:
             cmds.append(DrawCommand(
                 layer=Layer.INDICATORS,
@@ -369,13 +354,12 @@ class MACD(Indicator):
 
         # Histogram bars
         bar_w = max(1.0, coord_engine.get_bar_width() * 0.5)
-        # zero_y is already defined above
         for i in range(start_idx, min(end_idx, len(self._histogram))):
             h = self._histogram[i]
             if h is None:
                 continue
             x = coord_engine.index_to_x(i)
-            y = val_to_y(h)
+            y = coord_engine.price_to_y(h, vp, self.pane)
             color = self.color_hist_bull if h >= 0 else self.color_hist_bear
             cmds.append(DrawCommand(
                 layer=Layer.INDICATORS,

@@ -22,6 +22,7 @@ class SelectionManager:
         self._drag_start_y: float = 0.0
         self._drag_start_index: float = 0.0
         self._drag_start_price: float = 0.0
+        self._drag_pane: str = "candlestick"  # Pane for price calculations
         self._last_x: float = 0.0
         self._last_y: float = 0.0
         self._last_index: float = 0.0
@@ -92,13 +93,14 @@ class SelectionManager:
             self._hovered_id = shape_id
             self._event_bus.emit_new(EventType.HOVER_CHANGED, self, id=shape_id)
 
-    def start_drag(self, mode: str, handle: Optional[str], x: float, y: float, index: float, price: float) -> None:
+    def start_drag(self, mode: str, handle: Optional[str], x: float, y: float, index: float, price: float, pane: str = "candlestick") -> None:
         self._drag_mode = mode
         self._drag_handle = handle
         self._drag_start_x = x
         self._drag_start_y = y
         self._drag_start_index = index
         self._drag_start_price = price
+        self._drag_pane = pane  # Store pane for price calculations
         # Initialize last position to start position
         self._last_x = x
         self._last_y = y

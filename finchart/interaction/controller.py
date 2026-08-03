@@ -74,7 +74,17 @@ class InteractionController:
         x, y = event.x, event.y
         index = self._coord.x_to_index(x)
         chart_vp = self._widget._grid_renderer.get_chart_viewport() if self._widget else self._coord.viewport
-        price = self._coord.y_to_price(y, chart_vp)
+        
+        # Auto-detect target pane from mouse Y
+        target_pane = "candlestick"
+        if self._widget and self._widget._layout_engine.panes:
+            for pane_name in self._widget._layout_engine.panes:
+                pane_vp = self._coord.get_pane_viewport(pane_name)
+                if pane_vp.top <= y <= pane_vp.bottom:
+                    target_pane = pane_name
+                    break
+        
+        price = self._coord.y_to_price(y, chart_vp, target_pane)
 
         ctrl = (event.state & 0x4) != 0
 
@@ -90,7 +100,8 @@ class InteractionController:
                         points=[(None, price)],
                         color=Color(255, 165, 0),
                         width=2.0,
-                        style="solid"
+                        style="solid",
+                        pane_name=target_pane
                     )
                     self._widget.add_drawing(state)
                     self._widget.deactivate_tool()
@@ -102,7 +113,8 @@ class InteractionController:
                         points=[(index, None)],
                         color=Color(255, 165, 0),
                         width=2.0,
-                        style="solid"
+                        style="solid",
+                        pane_name=target_pane
                     )
                     self._widget.add_drawing(state)
                     self._widget.deactivate_tool()
@@ -141,7 +153,8 @@ class InteractionController:
                     fill=Color(255, 165, 0, 0.3) if ctx.tool_type == "rectangle" else None,
                     width=2.0,
                     style="solid",
-                    visible=True
+                    visible=True,
+                    pane_name=target_pane
                 )
                 ctx.preview_shape = preview_state
                 ctx.preview_tool = self._widget._create_tool(preview_state)
@@ -189,7 +202,8 @@ class InteractionController:
                     color=Color(255, 165, 0),
                     fill=Color(255, 165, 0, 0.3) if ctx.tool_type == "rectangle" else None,
                     width=2.0,
-                    style="solid"
+                    style="solid",
+                    pane_name=target_pane
                 )
                 self._widget.add_drawing(state)
                 self._widget.deactivate_tool()
@@ -212,7 +226,8 @@ class InteractionController:
                         color=Color(255, 165, 0),
                         width=2.0,
                         style="solid",
-                        label=label
+                        label=label,
+                        pane_name=target_pane
                     )
                     self._widget.add_drawing(state)
                     self._widget.deactivate_tool()
@@ -222,14 +237,19 @@ class InteractionController:
         if self._widget and self._widget._selection_manager.selected_id:
             tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
             if tool:
+                # Use the tool's pane for price calculations
+                tool_pane = tool.state.pane_name
+                tool_vp = chart_vp if tool_pane == "candlestick" else self._coord.get_pane_viewport(tool_pane)
+                tool_price = self._coord.y_to_price(y, tool_vp, tool_pane)
+                
                 handles = tool.get_handles(self._coord, chart_vp)
                 for hx, hy, hid in handles:
                     if is_point_near_handle(x, y, hx, hy, size=8):
                         snapped_index = round(index)  # Round to nearest bar for snapping
-                        self._widget._selection_manager.start_drag("endpoint", hid, x, y, snapped_index, price)
+                        self._widget._selection_manager.start_drag("endpoint", hid, x, y, snapped_index, tool_price, tool_pane)
                         return
                 if tool.hit_test(x, y, self._coord, chart_vp):
-                    self._widget._selection_manager.start_drag("whole", None, x, y, index, price)
+                    self._widget._selection_manager.start_drag("whole", None, x, y, index, tool_price, tool_pane)
                     return
 
         # Click on empty canvas: try to select a shape
@@ -251,14 +271,19 @@ class InteractionController:
                 # TradingView-style: select AND immediately start dragging in one motion
                 clicked_tool = self._widget._drawing_tools.get(clicked_id)
                 if clicked_tool:
+                    # Use the tool's pane for price calculations
+                    tool_pane = clicked_tool.state.pane_name
+                    tool_vp = chart_vp if tool_pane == "candlestick" else self._coord.get_pane_viewport(tool_pane)
+                    tool_price = self._coord.y_to_price(y, tool_vp, tool_pane)
+                    
                     handles = clicked_tool.get_handles(self._coord, chart_vp)
                     for hx, hy, hid in handles:
                         if is_point_near_handle(x, y, hx, hy, size=8):
                             snapped_index = round(index)  # Round to nearest bar for snapping
-                            self._widget._selection_manager.start_drag("endpoint", hid, x, y, snapped_index, price)
+                            self._widget._selection_manager.start_drag("endpoint", hid, x, y, snapped_index, tool_price, tool_pane)
                             return
                     if clicked_tool.hit_test(x, y, self._coord, chart_vp):
-                        self._widget._selection_manager.start_drag("whole", None, x, y, index, price)
+                        self._widget._selection_manager.start_drag("whole", None, x, y, index, tool_price, tool_pane)
                         return
                 return
             else:
@@ -279,11 +304,26 @@ class InteractionController:
         x, y = event.x, event.y
         index = self._coord.x_to_index(x)
         chart_vp = self._widget._grid_renderer.get_chart_viewport() if self._widget else self._coord.viewport
-        price = self._coord.y_to_price(y, chart_vp)
+        
+        # Auto-detect target pane from mouse Y
+        target_pane = "candlestick"
+        if self._widget and self._widget._layout_engine.panes:
+            for pane_name in self._widget._layout_engine.panes:
+                pane_vp = self._coord.get_pane_viewport(pane_name)
+                if pane_vp.top <= y <= pane_vp.bottom:
+                    target_pane = pane_name
+                    break
+        
+        price = self._coord.y_to_price(y, chart_vp, target_pane)
 
         # Drawing tool drag mode
         if self._widget and self._widget._selection_manager.drag_mode:
-            delta = self._widget._selection_manager.update_drag(x, y, index, price)
+            # Use the drag pane for price calculations
+            drag_pane = self._widget._selection_manager._drag_pane
+            drag_vp = chart_vp if drag_pane == "candlestick" else self._coord.get_pane_viewport(drag_pane)
+            drag_price = self._coord.y_to_price(y, drag_vp, drag_pane)
+            
+            delta = self._widget._selection_manager.update_drag(x, y, index, drag_price)
             if delta["mode"] == "endpoint":
                 # Endpoint drag affects only the primary selected shape
                 tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
@@ -326,7 +366,17 @@ class InteractionController:
         x, y = event.x, event.y
         index = self._coord.x_to_index(x)
         chart_vp = self._widget._grid_renderer.get_chart_viewport() if self._widget else self._coord.viewport
-        price = self._coord.y_to_price(y, chart_vp)
+        
+        # Auto-detect target pane from mouse Y
+        target_pane = "candlestick"
+        if self._widget and self._widget._layout_engine.panes:
+            for pane_name in self._widget._layout_engine.panes:
+                pane_vp = self._coord.get_pane_viewport(pane_name)
+                if pane_vp.top <= y <= pane_vp.bottom:
+                    target_pane = pane_name
+                    break
+        
+        price = self._coord.y_to_price(y, chart_vp, target_pane)
 
         # Update preview shape during drawing
         if self._widget and self._widget._tool_context and self._widget._tool_context.state in (ToolState.PREVIEW, ToolState.PREVIEW_2):
@@ -334,6 +384,9 @@ class InteractionController:
             snapped_index = round(index)  # Round to nearest bar for snapping
             ctx.current_index = snapped_index
             ctx.current_price = price
+            # Update the preview shape's pane to match current mouse position
+            if ctx.preview_shape:
+                ctx.preview_shape.pane_name = target_pane
 
             if ctx.preview_tool and ctx.preview_shape:
                 if ctx.tool_type == "hline":

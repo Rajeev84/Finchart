@@ -199,6 +199,18 @@ class ChartWidget(tk.Frame):
         self._indicators.append(indicator)
         if not self._data_store.is_empty:
             indicator.update(self._data_store.data)
+        
+        # Set fixed price range for RSI indicator (0-100)
+        if hasattr(indicator, '__class__') and indicator.__class__.__name__ == "RSI":
+            ps = self._coord_engine.get_pane_price_scale(active_pane)
+            ps.fixed_range = True
+            self._coord_engine.set_pane_price_scale(active_pane, 0.0, 100.0)
+        
+        # Set volume pane to start from zero
+        if hasattr(indicator, '__class__') and indicator.__class__.__name__ == "Volume":
+            ps = self._coord_engine.get_pane_price_scale(active_pane)
+            # Volume will be auto-scaled but with minimum at 0
+        
         self._update_price_scale()
         self._pipeline.force_full_redraw()
         self._request_render()
@@ -670,6 +682,12 @@ class ChartWidget(tk.Frame):
         for ind in self._indicators:
             if ind.pane == "candlestick" or not ind._last_result:
                 continue
+            
+            # Skip auto-scaling for indicators with fixed_range (e.g., RSI 0-100)
+            ps = self._coord_engine.get_pane_price_scale(ind.pane)
+            if ps.fixed_range:
+                continue
+                
             p_min = float('inf')
             p_max = float('-inf')
             has_data = False
@@ -768,7 +786,8 @@ class ChartWidget(tk.Frame):
     def _update_crosshair_badges(self) -> None:
         """Compute per-pane badge info and push it to the crosshair renderer.
 
-        Only the pane that currently contains the mouse cursor gets a badge.
+        TradingView behavior: A badge appears on the right axis of EVERY pane,
+        showing the value at the crosshair's Y-level in that pane.
         """
         cr = self._crosshair_renderer
         if not cr.is_visible or cr.snapped_index < 0:
@@ -780,42 +799,30 @@ class ChartWidget(tk.Frame):
         chart_vp = self._grid_renderer.get_chart_viewport()
         badges: List[PaneBadge] = []
 
-        # Determine which pane the mouse is actually hovering over
-        active_pane = "candlestick"
+        # Show badges for ALL panes simultaneously (TradingView standard)
         for pane_name in self._layout_engine.panes:
-            vp = self._coord_engine.get_pane_viewport(pane_name)
-            if vp.top <= mouse_y <= vp.bottom:
-                active_pane = pane_name
-                break
+            pane_vp = self._coord_engine.get_pane_viewport(pane_name)
+            if pane_vp.height <= 0:
+                continue
 
-        # Only draw ONE badge — for the active pane
-        if active_pane == "candlestick":
-            price_val = self._coord_engine.y_to_price(mouse_y, chart_vp)
-            badges.append(PaneBadge(
-                badge_y=mouse_y,
-                value_text=self._format_price_value(price_val),
-                pane_top=chart_vp.top,
-                pane_bottom=chart_vp.bottom,
-            ))
-        else:
-            pane_vp = self._coord_engine.get_pane_viewport(active_pane)
-            if pane_vp.height > 0:
-                # Find the first indicator in this pane that has a result
-                for ind in self._indicators:
-                    if ind.pane != active_pane or not ind._last_result:
-                        continue
-                    for key, vals in ind._last_result.values.items():
-                        if snapped_idx < len(vals) and vals[snapped_idx] is not None:
-                            val = vals[snapped_idx]
-                            y = self._coord_engine.price_to_y(val, pane_vp, pane=active_pane)
-                            badges.append(PaneBadge(
-                                badge_y=y,
-                                value_text=self._format_indicator_value(val, active_pane),
-                                pane_top=pane_vp.top,
-                                pane_bottom=pane_vp.bottom,
-                            ))
-                            break
-                    break
+            if pane_name == "candlestick":
+                # Main pane: use mouse Y position to get price
+                price_val = self._coord_engine.y_to_price(mouse_y, chart_vp, pane="candlestick")
+                badges.append(PaneBadge(
+                    badge_y=mouse_y,
+                    value_text=self._format_price_value(price_val),
+                    pane_top=chart_vp.top,
+                    pane_bottom=chart_vp.bottom,
+                ))
+            else:
+                # Subplot pane: use mouse Y position to get indicator value
+                indicator_val = self._coord_engine.y_to_price(mouse_y, pane_vp, pane=pane_name)
+                badges.append(PaneBadge(
+                    badge_y=mouse_y,
+                    value_text=self._format_indicator_value(indicator_val, pane_name),
+                    pane_top=pane_vp.top,
+                    pane_bottom=pane_vp.bottom,
+                ))
 
         cr.set_pane_badges(badges)
 
