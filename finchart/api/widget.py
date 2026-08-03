@@ -13,6 +13,7 @@ from __future__ import annotations
 import tkinter as tk
 from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 import json
+import math
 import os
 
 from ..core.types import OHLCV, Viewport, ChartType, Color
@@ -687,7 +688,7 @@ class ChartWidget(tk.Frame):
             ps = self._coord_engine.get_pane_price_scale(ind.pane)
             if ps.fixed_range:
                 continue
-                
+
             p_min = float('inf')
             p_max = float('-inf')
             has_data = False
@@ -698,12 +699,24 @@ class ChartWidget(tk.Frame):
                         p_min = min(p_min, v)
                         p_max = max(p_max, v)
                         has_data = True
-            if has_data and p_max > p_min:
-                # Volume pane should always start from zero so bars grow
-                # upward from the bottom of the pane.
-                if ind.pane == "volume":
-                    p_min = 0.0
-                self._coord_engine.set_pane_price_scale(ind.pane, p_min, p_max, emit_event=False)
+
+            if not has_data:
+                continue
+
+            # Volume pane should always start from zero so bars grow upward.
+            if ind.pane == "volume":
+                p_min = 0.0
+                if p_max <= p_min:
+                    p_max = 1.0
+
+            # Generic guard: if all visible values are identical, give a
+            # small artificial range so set_pane_price_scale doesn't degenerate.
+            if p_max <= p_min:
+                mid = p_min if math.isfinite(p_min) else 0.0
+                p_min = mid - 1.0
+                p_max = mid + 1.0
+
+            self._coord_engine.set_pane_price_scale(ind.pane, p_min, p_max, emit_event=False)
 
     def _update_indicators(self) -> None:
         """Recalculate indicator values for current data."""
@@ -714,15 +727,29 @@ class ChartWidget(tk.Frame):
             ind.update(data)
 
     def _render_indicators(self, chart_vp: Viewport, pane: str = "candlestick") -> None:
-        """Render commands for active indicators in the given pane."""
+        """Render commands for active indicators in the given pane.
+
+        For subplot panes (non-candlestick) a ``ClippingCoordinateProxy`` is
+        passed to each indicator instead of the raw engine.  The proxy
+        transparently forwards every CoordinateEngine call but enforces
+        ``clip=True`` on ``price_to_y``, so Y values can never escape the
+        pane viewport.  This is the single, general fix that protects every
+        current and future indicator without requiring any per-indicator
+        changes.
+        """
+        from ..coordinates.engine import ClippingCoordinateProxy
+
         vr = self._coord_engine.visible_range
         for ind in self._indicators:
             if ind.pane != pane:
                 continue
-            pane_vp = chart_vp
             if ind.pane != "candlestick":
                 pane_vp = self._coord_engine.get_pane_viewport(ind.pane)
-            cmds = ind.render_commands(self._coord_engine, vr.start_index, vr.end_index, pane_vp)
+                engine_for_ind = ClippingCoordinateProxy(self._coord_engine, pane_vp)
+            else:
+                pane_vp = chart_vp
+                engine_for_ind = self._coord_engine
+            cmds = ind.render_commands(engine_for_ind, vr.start_index, vr.end_index, pane_vp)
             self._pipeline.add_commands(cmds)
         self._pipeline.schedule_layer(Layer.INDICATORS)
 
@@ -807,18 +834,23 @@ class ChartWidget(tk.Frame):
 
             if pane_name == "candlestick":
                 # Main pane: use mouse Y position to get price
-                price_val = self._coord_engine.y_to_price(mouse_y, chart_vp, pane="candlestick")
+                # Clamp to pane bounds so the badge never leaves the pane area
+                clamped_y = max(chart_vp.top, min(chart_vp.bottom, mouse_y))
+                price_val = self._coord_engine.y_to_price(clamped_y, chart_vp, pane="candlestick")
                 badges.append(PaneBadge(
-                    badge_y=mouse_y,
+                    badge_y=clamped_y,
                     value_text=self._format_price_value(price_val),
                     pane_top=chart_vp.top,
                     pane_bottom=chart_vp.bottom,
                 ))
             else:
-                # Subplot pane: use mouse Y position to get indicator value
-                indicator_val = self._coord_engine.y_to_price(mouse_y, pane_vp, pane=pane_name)
+                # Subplot pane: clamp mouse_y to this pane's vertical extent so
+                # that when the mouse is over a *different* pane the badge still
+                # shows a value that makes sense within the subplot's scale.
+                clamped_y = max(pane_vp.top, min(pane_vp.bottom, mouse_y))
+                indicator_val = self._coord_engine.y_to_price(clamped_y, pane_vp, pane=pane_name)
                 badges.append(PaneBadge(
-                    badge_y=mouse_y,
+                    badge_y=clamped_y,
                     value_text=self._format_indicator_value(indicator_val, pane_name),
                     pane_top=pane_vp.top,
                     pane_bottom=pane_vp.bottom,

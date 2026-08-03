@@ -85,29 +85,37 @@ class CoordinateEngine:
         if pane_name not in self._price_scales:
             self._price_scales[pane_name] = PriceScale()
         ps = self._price_scales[pane_name]
-        
-        # Enforce fixed_range if set (e.g., RSI 0-100)
-        if ps.fixed_range:
-            min_price = max(min_price, 0.0)  # Ensure minimum doesn't go below 0
-            max_price = min(max_price, 100.0)  # Ensure maximum doesn't go above 100
-        
+
         rng = max_price - min_price
         if rng <= 0:
             rng = 1.0
+
+        # Apply visual padding so lines don't sit flush against pane edges.
+        # fixed_range panes (e.g. RSI 0-100) use the same padding logic; the
+        # flag's purpose is only to prevent the auto-scaler from overwriting
+        # the range later (see _update_price_scale in widget.py).
         top_pad = rng * ps.top_padding
         bot_pad = rng * ps.bottom_padding
-
         new_min = min_price - bot_pad
         new_max = max_price + top_pad
 
         # Check if the values actually changed to prevent infinite feedback loops
-        if (abs(ps.min_price - new_min) < 1e-9 and 
-            abs(ps.max_price - new_max) < 1e-9):
+        if (abs(ps.min_price - new_min) < 1e-9 and
+                abs(ps.max_price - new_max) < 1e-9):
             return
 
         ps.min_price = new_min
         ps.max_price = new_max
-        
+
+        # Only emit event if requested (not during normal rendering)
+        if emit_event:
+            self._event_bus.emit_new(
+                EventType.SCALE_CHANGED,
+                self,
+                min_price=ps.min_price,
+                max_price=ps.max_price
+            )
+
         # Only emit event if requested (not during normal rendering)
         if emit_event:
             self._event_bus.emit_new(
@@ -167,8 +175,18 @@ class CoordinateEngine:
             return 0.0
         return (x - self._viewport.left - self._time_scale.offset) / self._time_scale.bar_spacing
 
-    def price_to_y(self, price: float, viewport: Optional[Viewport] = None, pane: str = "candlestick") -> float:
-        """Convert price to Canvas Y pixel coordinate inside given or default viewport."""
+    def price_to_y(self, price: float, viewport: Optional[Viewport] = None, pane: str = "candlestick", clip: bool = False) -> float:
+        """Convert price to Canvas Y pixel coordinate inside given or default viewport.
+
+        Args:
+            price: The value to convert.
+            viewport: Pane viewport to use; defaults to the main chart viewport.
+            pane: Which pane's price scale to use for the conversion.
+            clip: When True, clamp the result to [vp.top, vp.bottom] so that
+                  out-of-range values never escape the pane boundary.  Pass
+                  clip=True for all subplot (non-candlestick) indicator
+                  rendering to get the general overflow-protection behaviour.
+        """
         vp = viewport or self._viewport
         ps = self.get_pane_price_scale(pane)
 
@@ -184,7 +202,10 @@ class CoordinateEngine:
         else:
             ratio = (price - ps.min_price) / price_range
 
-        return vp.bottom - ratio * vp.height
+        y = vp.bottom - ratio * vp.height
+        if clip:
+            y = max(vp.top, min(vp.bottom, y))
+        return y
 
     def y_to_price(self, y: float, viewport: Optional[Viewport] = None, pane: str = "candlestick") -> float:
         """Convert Canvas Y pixel coordinate to price."""
@@ -242,3 +263,30 @@ class CoordinateEngine:
         self._time_scale.bar_spacing = self._viewport.width / count
         self._time_scale.offset = -start_idx * self._time_scale.bar_spacing
         self._event_bus.emit_new(EventType.SCALE_CHANGED, self)
+
+
+class ClippingCoordinateProxy:
+    """Transparent proxy around CoordinateEngine that clips price_to_y output.
+
+    When an indicator calls ``price_to_y(val, vp, pane)`` through this proxy
+    the returned Y value is guaranteed to lie within ``[vp.top, vp.bottom]``.
+    This prevents any subplot indicator — present or future — from painting
+    outside its pane boundary regardless of scale mismatches or edge cases.
+
+    All other CoordinateEngine attributes and methods are forwarded unchanged
+    via ``__getattr__``, so indicators cannot tell the difference.
+    """
+
+    def __init__(self, engine: CoordinateEngine, pane_viewport: Viewport) -> None:
+        # Store under mangled names so __getattr__ doesn't recurse on them.
+        self.__dict__["_engine"] = engine
+        self.__dict__["_pane_vp"] = pane_viewport
+
+    # Override only the one method that needs clipping.
+    def price_to_y(self, price: float, viewport: Optional[Viewport] = None, pane: str = "candlestick", clip: bool = False) -> float:  # noqa: D401
+        """Delegate to the real engine with clip=True enforced."""
+        return self._engine.price_to_y(price, viewport, pane, clip=True)
+
+    def __getattr__(self, name: str):  # type: ignore[return]
+        """Forward every other attribute/method to the wrapped engine."""
+        return getattr(self._engine, name)
