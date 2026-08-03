@@ -630,16 +630,27 @@ class MarketProfileOverlay:
 class LongShort(DrawingTool):
     """
     TradingView-style Long/Short position shape.
-    
+
     Points:
         [0] = (entry_index, entry_price)
-        [1] = (width_index, target_price)
-        [2] = (width_index, stop_price)
+        [1] = (width_index, stop_price)
+        [2] = (width_index, target_price)
     """
 
     def __init__(self, state: DrawingState) -> None:
         super().__init__(state)
         self._live_price: Optional[float] = None
+        self._position_type: str = "long"  # Default to long
+        self._parse_label()
+
+    def _parse_label(self) -> None:
+        """Parse label to extract quantity and position type."""
+        if self.state.label and "|" in self.state.label:
+            parts = self.state.label.split("|")
+            if len(parts) == 2:
+                self._position_type = parts[1].lower()
+        # For preview states without proper label, position type will be set externally
+        # via tool context. Final determination will be based on price relationship when shape is complete.
 
     def update_live_price(self, price: Optional[float]) -> None:
         """Called by ChartWidget before each render so PnL label stays live."""
@@ -660,16 +671,25 @@ class LongShort(DrawingTool):
         return self.state.points[1][0] if len(self.state.points) > 1 else self.entry_index
 
     @property
-    def target_price(self) -> float:
+    def stop_price(self) -> float:
         return self.state.points[1][1] if len(self.state.points) > 1 else self.entry_price
 
     @property
-    def stop_price(self) -> float:
+    def target_price(self) -> float:
         return self.state.points[2][1] if len(self.state.points) > 2 else self.entry_price
 
     @property
     def is_long(self) -> bool:
-        return self.target_price >= self.stop_price
+        # For preview/incomplete states, use stored position type
+        if hasattr(self, '_position_type') and self._position_type:
+            return self._position_type == "long"
+        # For complete states, determine from price relationship
+        # points[1] = stop, points[2] = target
+        if len(self.state.points) >= 3:
+            stop_price = self.state.points[1][1] if len(self.state.points) > 1 else self.entry_price
+            target_price = self.state.points[2][1] if len(self.state.points) > 2 else self.entry_price
+            return target_price >= stop_price
+        return True  # Default to long for incomplete states
 
     @property
     def quantity(self) -> float:
@@ -691,15 +711,29 @@ class LongShort(DrawingTool):
 
     def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine,
                  viewport: Optional[Any] = None) -> bool:
-        if len(self.state.points) < 3 or self.state.locked:
+        # Allow hit testing for preview states (1+ points)
+        if len(self.state.points) < 1 or self.state.locked:
             return False
 
         vp = viewport or coord_engine.viewport
         ex = coord_engine.index_to_x(self.entry_index)
         ey = coord_engine.price_to_y(self.entry_price, vp)
-        wx = coord_engine.index_to_x(self.width_index)
-        ty = coord_engine.price_to_y(self.target_price, vp)
-        sy = coord_engine.price_to_y(self.stop_price, vp)
+
+        # For preview states, handle missing points gracefully
+        if len(self.state.points) >= 2:
+            wx = coord_engine.index_to_x(self.width_index)
+        else:
+            wx = ex
+
+        if len(self.state.points) >= 2:
+            sy = coord_engine.price_to_y(self.stop_price, vp)
+        else:
+            sy = ey
+
+        if len(self.state.points) >= 3:
+            ty = coord_engine.price_to_y(self.target_price, vp)
+        else:
+            ty = ey
 
         tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
 
@@ -755,14 +789,14 @@ class LongShort(DrawingTool):
                 width_i = pts[1][0]
                 pts[1] = (width_i, pts[1][1])
                 pts[2] = (width_i, pts[2][1])
-        elif handle_id == "target":
+        elif handle_id == "stop":
             width_i = pts[1][0]
             pts[1] = (width_i, new_price)
-        elif handle_id == "stop":
+        elif handle_id == "target":
             width_i = pts[2][0]
             pts[2] = (width_i, new_price)
         elif handle_id == "width":
-            # Move width_index, preserve target/stop prices
+            # Move width_index, preserve stop/target prices
             width_i = round(new_index)
             pts[1] = (width_i, pts[1][1])
             pts[2] = (width_i, pts[2][1])
@@ -818,21 +852,25 @@ class LongShort(DrawingTool):
         ))
 
         # 2) Target zone (green)
-        target_rect = (ex, min(ey, ty), wx, max(ey, ty))
-        cmds.append(DrawCommand(
-            layer=Layer.DRAWING,
-            tag=f"target_zone_{self.state.id}",
-            item_type="rectangle",
-            coords=target_rect,
-            options={
-                "fill": target_color,
-                "outline": "",
-                "stipple": "gray25"
-            },
-            z_index=4
-        ))
+        # Only render target zone when target is independently defined (not equal to stop)
+        zones_identical = len(self.state.points) >= 3 and abs(self.target_price - self.stop_price) < 1e-9
+        if not zones_identical:
+            target_rect = (ex, min(ey, ty), wx, max(ey, ty))
+            cmds.append(DrawCommand(
+                layer=Layer.DRAWING,
+                tag=f"target_zone_{self.state.id}",
+                item_type="rectangle",
+                coords=target_rect,
+                options={
+                    "fill": target_color,
+                    "outline": "",
+                    "stipple": "gray25"
+                },
+                z_index=4
+            ))
 
         # 3) Stop zone (red)
+        # Always render stop zone (it is the "first" box being defined)
         # Only draw stop zone if it differs meaningfully from entry
         if abs(self.stop_price - self.entry_price) > 1e-9:
             stop_rect = (ex, min(ey, sy), wx, max(ey, sy))
@@ -851,9 +889,14 @@ class LongShort(DrawingTool):
 
         # 4) Labels
         qty = self.quantity
+        # Target PnL should be positive (profit)
         target_pnl = (self.target_price - self.entry_price) * qty if self.is_long else (self.entry_price - self.target_price) * qty
-        stop_pnl = (self.stop_price - self.entry_price) * qty if self.is_long else (self.entry_price - self.stop_price) * qty
-        
+        # Stop PnL should be negative (loss) - calculate correctly based on position type
+        if self.is_long:
+            stop_pnl = (self.stop_price - self.entry_price) * qty  # negative if stop < entry
+        else:
+            stop_pnl = (self.entry_price - self.stop_price) * qty  # negative if stop > entry
+
         # Live PnL if live price available
         if self._live_price is not None:
             live_pnl = (self._live_price - self.entry_price) * qty if self.is_long else (self.entry_price - self._live_price) * qty
@@ -863,19 +906,34 @@ class LongShort(DrawingTool):
 
         # Compute and display Risk/Reward ratio
         rr = self.risk_reward_ratio
-        rr_text = f" RR 1:{rr:.1f}" if rr else ""
 
-        # Entry label (quantity + price + Risk/Reward)
+        # Split labels with vertical spacing
         box_left = min(ex, wx)
-        box_right = max(ex, wx)
-        entry_label = f"{qty} @ {self.entry_price:.2f}{rr_text}"
+
+        # RR label (above entry)
+        if rr:
+            cmds.append(DrawCommand(
+                layer=Layer.DRAWING,
+                tag=f"rr_label_{self.state.id}",
+                item_type="text",
+                coords=(box_left + 4, ey - 18),
+                options={
+                    "text": f"RR 1:{rr:.1f}",
+                    "fill": "#FFFFFF",
+                    "font": ("Segoe UI", 9),
+                    "anchor": "nw"
+                },
+                z_index=6
+            ))
+
+        # Entry label (quantity + price)
         cmds.append(DrawCommand(
             layer=Layer.DRAWING,
             tag=f"entry_label_{self.state.id}",
             item_type="text",
             coords=(box_left + 4, ey - 6),
             options={
-                "text": entry_label,
+                "text": f"{qty} @ {self.entry_price:.2f}",
                 "fill": "#FFFFFF",
                 "font": ("Segoe UI", 9, "bold"),
                 "anchor": "nw"
@@ -888,12 +946,12 @@ class LongShort(DrawingTool):
             layer=Layer.DRAWING,
             tag=f"pnl_label_{self.state.id}",
             item_type="text",
-            coords=(ex + 5, ey + 10),
+            coords=(box_left + 4, ey + 12),
             options={
                 "text": pnl_text,
                 "fill": "#FFD700" if self._live_price else "#AAAAAA",
                 "font": ("Segoe UI", 9),
-                "anchor": "w"
+                "anchor": "nw"
             },
             z_index=6
         ))

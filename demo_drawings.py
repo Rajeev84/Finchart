@@ -92,18 +92,25 @@ def main():
     def activate_longshort():
         chart.set_active_tool("longshort")
 
+    def activate_long():
+        chart.set_active_tool("longshort", "long")
+
+    def activate_short():
+        chart.set_active_tool("longshort", "short")
+
     def deactivate():
         chart.deactivate_tool()
 
     # Drawing tools section
     tk.Label(toolbar, text="Draw:", bg="#2d2d2d", fg="#888888").pack(side="left", padx=(10, 5))
-    
+
     create_tool_button(toolbar, "📈 Trend", activate_trendline)
     create_tool_button(toolbar, "━ H-Line", activate_hline)
     create_tool_button(toolbar, "┃ V-Line", activate_vline)
     create_tool_button(toolbar, "∠ Angle", activate_angleline)
     create_tool_button(toolbar, "▢ Rect", activate_rectangle)
-    create_tool_button(toolbar, "📊 Position", activate_longshort)
+    create_tool_button(toolbar, "� Long", activate_long)
+    create_tool_button(toolbar, "📉 Short", activate_short)
     create_tool_button(toolbar, "✕ Cancel", deactivate)
 
     tk.Frame(toolbar, width=2, bg="#444444").pack(side="left", padx=10, fill="y")
@@ -139,22 +146,22 @@ def main():
     def add_sample_long():
         state = DrawingState(
             tool_type="longshort",
-            points=[(30, 100.0), (60, 110.0), (60, 95.0)],
+            points=[(30, 100.0), (60, 95.0), (60, 110.0)],
             color=Color(255, 165, 0),
             width=2.0,
             style="solid",
-            label="10.0"  # quantity (used by LongShort tool)
+            label="10.0|long"  # quantity and position type
         )
         chart.add_drawing(state)
 
     def add_sample_short():
         state = DrawingState(
             tool_type="longshort",
-            points=[(100, 100.0), (130, 95.0), (130, 110.0)],
+            points=[(100, 100.0), (130, 110.0), (130, 95.0)],
             color=Color(255, 165, 0),
             width=2.0,
             style="solid",
-            label="5.0"  # quantity (used by LongShort tool)
+            label="5.0|short"  # quantity and position type
         )
         chart.add_drawing(state)
 
@@ -169,8 +176,8 @@ def main():
     status_frame.pack(fill="x", side="bottom")
 
     status_label = tk.Label(
-        status_frame, 
-        text="Ready - Select a tool to start drawing | Long/Short: 3-click (entry → target → stop) | Ctrl+C/V: Copy/Paste",
+        status_frame,
+        text="Ready - Select a tool to start drawing | Long/Short: 3-click (entry → stop → target) | Ctrl+C/V: Copy/Paste",
         bg="#2d2d2d", fg="#888888", anchor="w"
     )
     status_label.pack(side="left", padx=10, pady=2)
@@ -182,9 +189,9 @@ def main():
             state = chart._tool_context.state
             if tool == "longshort":
                 if state.name == "PREVIEW":
-                    status = "Long/Short: Click to set target/stop level"
-                elif state.name == "PREVIEW_2":
                     status = "Long/Short: Click to set stop-loss level"
+                elif state.name == "PREVIEW_2":
+                    status = "Long/Short: Click to set target/profit level"
                 else:
                     status = "Long/Short: Click to set entry point"
             elif tool in ["hline", "vline"]:
@@ -205,7 +212,7 @@ def main():
     # Instructions overlay (minimal)
     instructions = (
         "Drawing Tools: TrendLine (2-click), H-Line/V-Line (1-click), AngleLine (45° preset), Rectangle (2-click), "
-        "Long/Short Position (3-click: entry → target → stop). "
+        "Long/Short Position (3-click: entry → stop → target). "
         "Copy/Paste: Ctrl+C / Ctrl+V. "
         "Cancel: ESC or Right-Click. "
         "Crosshair: Dashed lines (TradingView-style)."

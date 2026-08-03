@@ -407,9 +407,14 @@ class ChartWidget(tk.Frame):
         if ids:
             self._selection_manager.select_all(ids)
 
-    def set_active_tool(self, tool_type: str) -> None:
-        """Activate a drawing tool for creation mode."""
-        self._tool_context = ToolContext(tool_type=tool_type, state=ToolState.WAIT_FIRST_CLICK)
+    def set_active_tool(self, tool_type: str, position_type: str = "") -> None:
+        """Activate a drawing tool for creation mode.
+
+        Args:
+            tool_type: The type of drawing tool ("trendline", "hline", etc.)
+            position_type: For longshort tool, specify "long" or "short"
+        """
+        self._tool_context = ToolContext(tool_type=tool_type, position_type=position_type, state=ToolState.WAIT_FIRST_CLICK)
         # Change cursor to crosshair
         self._canvas.config(cursor="crosshair")
 
@@ -432,7 +437,12 @@ class ChartWidget(tk.Frame):
             "longshort": LongShort,
         }
         cls = mapping.get(state.tool_type, TrendLine)
-        return cls(state)
+        tool = cls(state)
+        # For LongShort, ensure position type is set from context if available
+        if state.tool_type == "longshort" and self._tool_context and self._tool_context.position_type:
+            if hasattr(tool, '_position_type'):
+                tool._position_type = self._tool_context.position_type
+        return tool
 
     def copy_selected(self) -> None:
         """Copy the currently selected drawing to clipboard."""

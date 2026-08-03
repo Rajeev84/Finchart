@@ -21,7 +21,8 @@ class ToolState(Enum):
 @dataclass
 class ToolContext:
     """Context for the active drawing tool session."""
-    tool_type: str = ""           # "trendline", "hline", "vline", "angleline", "rectangle"
+    tool_type: str = ""           # "trendline", "hline", "vline", "angleline", "rectangle", "longshort"
+    position_type: str = ""       # For longshort: "long" or "short"
     state: ToolState = ToolState.IDLE
     preview_shape: Optional[Any] = None   # DrawingState for preview
     preview_tool: Optional[Any] = None    # DrawingTool instance for preview

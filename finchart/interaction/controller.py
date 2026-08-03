@@ -7,11 +7,15 @@ from __future__ import annotations
 
 import tkinter as tk
 from typing import Optional, Callable, Any
+import uuid
+import math
 
 from ..core.events import EventBus, EventType
 from ..coordinates.engine import CoordinateEngine
 from ..interaction.hit_test import is_point_near_handle
 from ..interaction.tool_state import ToolState
+from ..drawing.base import DrawingState
+from ..core.types import Color
 
 
 class InteractionController:
@@ -80,9 +84,6 @@ class InteractionController:
             if ctx.state == ToolState.WAIT_FIRST_CLICK:
                 # HLine and VLine are single-click tools
                 if ctx.tool_type == "hline":
-                    from ..drawing.base import DrawingState
-                    from ..core.types import Color
-                    import uuid
                     state = DrawingState(
                         id=uuid.uuid4().hex,
                         tool_type="hline",
@@ -95,9 +96,6 @@ class InteractionController:
                     self._widget.deactivate_tool()
                     return
                 elif ctx.tool_type == "vline":
-                    from ..drawing.base import DrawingState
-                    from ..core.types import Color
-                    import uuid
                     state = DrawingState(
                         id=uuid.uuid4().hex,
                         tool_type="vline",
@@ -118,10 +116,6 @@ class InteractionController:
                 ctx.current_price = price
                 ctx.state = ToolState.PREVIEW
                 # Create preview shape
-                from ..drawing.base import DrawingState
-                from ..core.types import Color
-                import math
-
                 points = []
                 if ctx.tool_type == "angleline":
                     # For angleline, calculate second point based on 45-degree angle
@@ -131,9 +125,11 @@ class InteractionController:
                     # Invert dy because canvas Y increases downward
                     points = [(snapped_index, price), (snapped_index + dx, price - dy)]
                 elif ctx.tool_type == "longshort":
-                    # LongShort is a three-click tool: entry -> width/target -> stop
+                    # LongShort is a three-click tool: entry -> stop -> target
                     # First click: entry point
                     points = [(snapped_index, price)]
+                    # Store position type for later use
+                    ctx.position_type = ctx.position_type if ctx.position_type else "long"
                 else:
                     points = [(snapped_index, price), (snapped_index, price)]  # Start and end same initially
 
@@ -149,26 +145,27 @@ class InteractionController:
                 )
                 ctx.preview_shape = preview_state
                 ctx.preview_tool = self._widget._create_tool(preview_state)
+                # For LongShort, ensure position type is set in the preview tool
+                if ctx.tool_type == "longshort" and hasattr(ctx.preview_tool, '_position_type'):
+                    ctx.preview_tool._position_type = ctx.position_type
                 self._widget._pipeline.force_full_redraw()
                 self._widget._request_render()
                 return
             elif ctx.state == ToolState.PREVIEW:
                 # Handle second click for multi-click tools
-                from ..drawing.base import DrawingState
-                from ..core.types import Color
-                import uuid
-                import math
-
                 snapped_index = round(index)  # Round to nearest bar for snapping
-                
+
                 # LongShort is a three-click tool - move to third click state
                 if ctx.tool_type == "longshort":
                     points = list(ctx.preview_shape.points)
-                    points.append((snapped_index, price))  # Add target point
-                    points.append((snapped_index, price))  # Placeholder for stop point
-                    
+                    points.append((snapped_index, price))  # Add stop point
+                    points.append((snapped_index, price))  # Placeholder for target point
+
                     ctx.preview_shape.points = points
                     ctx.preview_tool = self._widget._create_tool(ctx.preview_shape)
+                    # Preserve position type in the recreated preview tool
+                    if hasattr(ctx.preview_tool, '_position_type'):
+                        ctx.preview_tool._position_type = ctx.position_type
                     ctx.state = ToolState.PREVIEW_2  # Move to third click state
                     self._widget._pipeline.force_full_redraw()
                     self._widget._request_render()
@@ -202,8 +199,12 @@ class InteractionController:
                 if ctx.tool_type == "longshort":
                     snapped_index = round(index)  # Round to nearest bar for snapping
                     points = list(ctx.preview_shape.points)
-                    points[2] = (snapped_index, price)  # Update stop point
-                    
+                    points[2] = (snapped_index, price)  # Update target point
+
+                    # Use position_type to determine label format
+                    position_type = ctx.position_type if ctx.position_type else "long"
+                    label = f"1.0|{position_type}"  # Store quantity and position type
+
                     state = DrawingState(
                         id=uuid.uuid4().hex,
                         tool_type="longshort",
@@ -211,7 +212,7 @@ class InteractionController:
                         color=Color(255, 165, 0),
                         width=2.0,
                         style="solid",
-                        label="1.0"  # Default quantity
+                        label=label
                     )
                     self._widget.add_drawing(state)
                     self._widget.deactivate_tool()
@@ -283,17 +284,21 @@ class InteractionController:
         # Drawing tool drag mode
         if self._widget and self._widget._selection_manager.drag_mode:
             delta = self._widget._selection_manager.update_drag(x, y, index, price)
-            tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
-            if tool:
-                if delta["mode"] == "endpoint":
+            if delta["mode"] == "endpoint":
+                # Endpoint drag affects only the primary selected shape
+                tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
+                if tool:
                     tool.move_endpoint(delta["handle"], delta["new_index"], delta["new_price"])
-                elif delta["mode"] == "whole":
-                    # Incremental deltas from SelectionManager — no cumulative compounding
-                    d_index = delta.get("d_index", 0.0)
-                    d_price = delta.get("d_price", 0.0)
-                    tool.move_whole(d_index, d_price)
-                self._widget._pipeline.force_full_redraw()
-                self._widget._request_render()
+            elif delta["mode"] == "whole":
+                # Whole-shape drag affects all selected shapes
+                d_index = delta.get("d_index", 0.0)
+                d_price = delta.get("d_price", 0.0)
+                for sid in self._widget._selection_manager.selected_ids:
+                    tool = self._widget._drawing_tools.get(sid)
+                    if tool:
+                        tool.move_whole(d_index, d_price)
+            self._widget._pipeline.force_full_redraw()
+            self._widget._request_render()
             self._event_bus.emit_new(EventType.MOUSE_MOVE, self, x=event.x, y=event.y, dragging=True)
             return
 
@@ -331,7 +336,6 @@ class InteractionController:
             ctx.current_price = price
 
             if ctx.preview_tool and ctx.preview_shape:
-                import math
                 if ctx.tool_type == "hline":
                     ctx.preview_shape.points = [(None, price)]
                 elif ctx.tool_type == "vline":
@@ -346,15 +350,15 @@ class InteractionController:
                     # Handle LongShort preview updates
                     points = list(ctx.preview_shape.points)
                     if ctx.state == ToolState.PREVIEW:
-                        # Second point (width/target) being set
+                        # Second point (width/stop) being set
                         if len(points) == 1:
                             points.append((snapped_index, price))
-                            points.append((snapped_index, price))  # Placeholder for stop
+                            points.append((snapped_index, price))  # Placeholder for target
                         else:
                             points[1] = (snapped_index, price)
                             points[2] = (snapped_index, price)
                     elif ctx.state == ToolState.PREVIEW_2:
-                        # Third point (stop) being set
+                        # Third point (target) being set
                         if len(points) >= 3:
                             points[2] = (snapped_index, price)
                     ctx.preview_shape.points = points
