@@ -11,7 +11,7 @@ Subclass of tk.Frame that orchestrates all subsystems:
 from __future__ import annotations
 
 import tkinter as tk
-from typing import List, Optional, Callable, Dict, Any, Union
+from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 import json
 import os
 
@@ -28,7 +28,7 @@ from ..interaction.controller import InteractionController
 from ..interaction.selection_manager import SelectionManager
 from ..interaction.tool_state import ToolContext, ToolState
 from ..indicators.base import Indicator
-from ..drawing.tools import TrendLine, HorizontalLine, VerticalLine, AngleLine, Rectangle, MarketProfileOverlay
+from ..drawing.tools import TrendLine, HorizontalLine, VerticalLine, AngleLine, Rectangle, MarketProfileOverlay, LongShort
 from ..drawing.base import DrawingState
 from ..themes.style import Theme, DarkTheme, LightTheme
 
@@ -87,6 +87,10 @@ class ChartWidget(tk.Frame):
         # Rendering Pipeline
         self._pipeline = RenderingPipeline(self._canvas, self._event_bus)
 
+        # Clipboard for copy/paste drawings
+        self._clipboard_drawing: Optional[DrawingState] = None
+        self._copy_buffer: Optional[DrawingState] = None
+
         # Specialized Renderers
         self._series_renderer = SeriesRenderer(
             self._pipeline,
@@ -134,6 +138,9 @@ class ChartWidget(tk.Frame):
         # Drawing tool state management
         self._selection_manager = SelectionManager(self._event_bus)
         self._tool_context: Optional[ToolContext] = None
+
+        # Universal trigger callback
+        self._trigger: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None
 
         # Configuration Flags
         self._auto_scale = True
@@ -250,7 +257,7 @@ class ChartWidget(tk.Frame):
 
         # Ensure viewport is updated
         self._update_viewport()
-        
+
         chart_vp = self._grid_renderer.get_chart_viewport()
         if chart_vp.width <= 0:
             # Retry after a delay if viewport not ready
@@ -267,6 +274,44 @@ class ChartWidget(tk.Frame):
         self._update_price_scale()
         self._pipeline.force_full_redraw()
         self._request_render()
+
+    def set_trigger(self, trigger: Callable[[str, str, str, Dict[str, Any]], None]) -> None:
+        """Set a universal trigger callback for all mouse/keyboard events."""
+        self._trigger = trigger
+
+    def _resolve_pane_and_shape(self, x: float, y: float) -> Tuple[str, str]:
+        """Return (pane_name, shape_id_or_name) at pixel (x, y)."""
+        # 1) Resolve pane by Y
+        plot = "candlestick"
+        for pane_name in self._layout_engine.panes:
+            vp = self._coord_engine.get_pane_viewport(pane_name)
+            if vp.top <= y <= vp.bottom:
+                plot = pane_name
+                break
+
+        # 2) Resolve shape by hit-test (drawings first, top-most wins)
+        shape = ""
+        chart_vp = self._grid_renderer.get_chart_viewport()
+        for sid, tool in reversed(list(self._drawing_tools.items())):
+            pane_vp = chart_vp if tool.state.pane_name == "candlestick" else self._coord_engine.get_pane_viewport(tool.state.pane_name)
+            if tool.hit_test(x, y, self._coord_engine, pane_vp):
+                shape = f"{tool.state.tool_type}_{sid}"
+                break
+        else:
+            # 3) Check indicators (overlay indicators on candlestick pane)
+            for ind in self._indicators:
+                if hasattr(ind, 'hit_test') and ind.hit_test(x, y, self._coord_engine, chart_vp):
+                    shape = getattr(ind, 'name', ind.__class__.__name__)
+                    break
+
+        return plot, shape
+
+    def _fire_trigger(self, event_type: str, x: float = -1, y: float = -1, **extra) -> None:
+        if not self._trigger:
+            return
+        plot, shape = self._resolve_pane_and_shape(x, y)
+        data = {"x": x, "y": y, **extra}
+        self._trigger(plot, shape, event_type, data)
 
     def zoom(self, factor: float) -> None:
         """Zoom time scale by factor centered at canvas middle."""
@@ -336,8 +381,17 @@ class ChartWidget(tk.Frame):
         if shape_id in self._drawing_tools:
             del self._drawing_tools[shape_id]
             del self._drawings[shape_id]
-            if self._selection_manager.selected_id == shape_id:
-                self._selection_manager.unselect()
+            # Update selection if this drawing was selected
+            if shape_id in self._selection_manager.selected_ids:
+                self._selection_manager.selected_ids.discard(shape_id)
+                if self._selection_manager.selected_id == shape_id:
+                    self._selection_manager.selected_id = next(iter(self._selection_manager.selected_ids), None)
+                    # Emit selection changed event to update UI
+                    self._event_bus.emit_new(
+                        EventType.SELECTION_CHANGED, self,
+                        primary=self._selection_manager.selected_id,
+                        selected=list(self._selection_manager.selected_ids)
+                    )
             self._pipeline.force_full_redraw()
             self._request_render()
 
@@ -348,6 +402,18 @@ class ChartWidget(tk.Frame):
         self._selection_manager.unselect()
         self._pipeline.force_full_redraw()
         self._request_render()
+
+    def delete_selected_drawings(self) -> None:
+        """Remove all currently selected drawings."""
+        to_delete = list(self._selection_manager.selected_ids)
+        for sid in to_delete:
+            self.remove_drawing(sid)
+
+    def select_all_drawings(self) -> None:
+        """Select every drawing on the chart."""
+        ids = list(self._drawing_tools.keys())
+        if ids:
+            self._selection_manager.select_all(ids)
 
     def set_active_tool(self, tool_type: str) -> None:
         """Activate a drawing tool for creation mode."""
@@ -371,9 +437,49 @@ class ChartWidget(tk.Frame):
             "vline": VerticalLine,
             "angleline": AngleLine,
             "rectangle": Rectangle,
+            "longshort": LongShort,
         }
         cls = mapping.get(state.tool_type, TrendLine)
         return cls(state)
+
+    def copy_selected(self) -> None:
+        """Copy the currently selected drawing to clipboard."""
+        if self._selection_manager.selected_id:
+            selected_id = self._selection_manager.selected_id
+            if selected_id in self._drawings:
+                import copy
+                self._clipboard_drawing = copy.deepcopy(self._drawings[selected_id])
+
+    def copy_selected_drawing(self) -> Optional[DrawingState]:
+        """Copy the currently selected drawing and return it."""
+        if self._selection_manager.selected_id:
+            selected_id = self._selection_manager.selected_id
+            if selected_id in self._drawings:
+                import copy
+                return copy.deepcopy(self._drawings[selected_id])
+        return None
+
+    def paste_drawing(self, drawing_state: Optional[DrawingState] = None) -> None:
+        """Paste the drawing from clipboard with offset."""
+        source = drawing_state or self._clipboard_drawing
+        if source:
+            import copy
+            import uuid
+            new_state = copy.deepcopy(source)
+            new_state.id = uuid.uuid4().hex
+
+            # Offset the drawing by 10 bars to avoid exact overlap
+            offset = 10.0
+            new_state.points = [(i + offset if i is not None else None, p) for i, p in new_state.points]
+
+            self.add_drawing(new_state)
+
+    def update_live_price(self, price: Optional[float]) -> None:
+        """Update live price for LongShort position PnL calculation."""
+        for tool in self._drawing_tools.values():
+            if hasattr(tool, 'update_live_price'):
+                tool.update_live_price(price)
+        self._request_render()
 
     # ==================== Internal Subsystem Routing ====================
 
@@ -387,6 +493,11 @@ class ChartWidget(tk.Frame):
         eb.subscribe(EventType.DATA_CHANGED, self._on_data_changed_event)
         eb.subscribe(EventType.SELECTION_CHANGED, self._on_selection_changed)
         eb.subscribe(EventType.HOVER_CHANGED, self._on_hover_changed)
+        # NEW subscriptions
+        eb.subscribe(EventType.MOUSE_DOWN, self._on_mouse_down_event)
+        eb.subscribe(EventType.MOUSE_UP, self._on_mouse_up_event)
+        eb.subscribe(EventType.MOUSE_WHEEL, self._on_mouse_wheel_event)
+        eb.subscribe(EventType.KEY_DOWN, self._on_key_down_event)
 
     def _on_resize(self, event: tk.Event) -> None:
         """Handle widget resize event."""
@@ -400,6 +511,7 @@ class ChartWidget(tk.Frame):
         """Route mouse movement to crosshair and hover callback."""
         x = event.data.get("x", -1.0)
         y = event.data.get("y", -1.0)
+        dragging = event.data.get("dragging", False)
         chart_vp = self._grid_renderer.get_chart_viewport()
 
         if event.data.get("leave") or x < 0 or y < 0:
@@ -407,6 +519,10 @@ class ChartWidget(tk.Frame):
             return
 
         self._crosshair_renderer.on_mouse_move(x, y, chart_vp)
+
+        # Trigger: hover OR drag
+        etype = "drag" if dragging else "hover"
+        self._fire_trigger(etype, x, y)
 
         # Trigger optional user callback
         if self._callback and self._crosshair_renderer.snapped_bar:
@@ -446,9 +562,11 @@ class ChartWidget(tk.Frame):
 
     def _on_selection_changed(self, event: Event) -> None:
         """Handle selection changed events."""
-        new_id = event.data.get("new")
+        selected = event.data.get("selected", [])
+        if not selected and event.data.get("new"):
+            selected = [event.data.get("new")]
         for sid, state in self._drawings.items():
-            state.selected = (sid == new_id)
+            state.selected = sid in selected
         self._pipeline.force_full_redraw()
         self._request_render()
 
@@ -459,6 +577,33 @@ class ChartWidget(tk.Frame):
             state.hovered = (sid == hid)
         self._pipeline.force_full_redraw()
         self._request_render()
+
+    def _on_mouse_down_event(self, event: Event) -> None:
+        x = event.data.get("x", -1)
+        y = event.data.get("y", -1)
+        num = event.data.get("num", 1)
+        is_double = event.data.get("double", False)
+        if is_double:
+            etype = "doubleclick"
+        else:
+            etype = "rightclick" if num == 3 else "click"
+        self._fire_trigger(etype, x, y, button=num, double=is_double)
+
+    def _on_mouse_up_event(self, event: Event) -> None:
+        x = event.data.get("x", -1)
+        y = event.data.get("y", -1)
+        self._fire_trigger("mouseup", x, y)
+
+    def _on_mouse_wheel_event(self, event: Event) -> None:
+        x = event.data.get("x", -1)
+        y = event.data.get("y", -1)
+        factor = event.data.get("factor", 1.0)
+        self._fire_trigger("scroll", x, y, factor=factor)
+
+    def _on_key_down_event(self, event: Event) -> None:
+        keysym = event.data.get("keysym", "")
+        char = event.data.get("char", "")
+        self._fire_trigger("keydown", key=keysym, char=char)
 
     def _update_viewport(self) -> None:
         """Synchronize coordinate engine viewport with canvas dimensions."""
@@ -584,9 +729,17 @@ class ChartWidget(tk.Frame):
                 self._render_indicators(pane_vp, pane_name)
 
         # Render all drawings
+        # Push live price to LongShort tools for PnL calculation
+        live_price = None
+        if not self._data_store.is_empty:
+            last_bar = self._data_store.data[-1]
+            live_price = last_bar.close  # Use last bar close as live price
+        
         for tool in self._drawing_tools.values():
             if not tool.state.visible:
                 continue
+            if hasattr(tool, 'update_live_price'):
+                tool.update_live_price(live_price)
             pane_vp = chart_vp if tool.state.pane_name == "candlestick" else self._coord_engine.get_pane_viewport(tool.state.pane_name)
             cmds = tool.render_commands(self._coord_engine, pane_vp)
             self._pipeline.add_commands(cmds)
@@ -615,13 +768,7 @@ class ChartWidget(tk.Frame):
     def _update_crosshair_badges(self) -> None:
         """Compute per-pane badge info and push it to the crosshair renderer.
 
-        For the main candlestick pane the badge shows the price at the
-        cursor's Y position.  For each subplot pane (RSI, MACD, Volume, …)
-        the badge shows the indicator's primary value at the snapped bar
-        index, positioned at that value's Y coordinate.
-
-        This mirrors how TradingView lightweight-charts renders a price
-        label on the right axis of every pane.
+        Only the pane that currently contains the mouse cursor gets a badge.
         """
         cr = self._crosshair_renderer
         if not cr.is_visible or cr.snapped_index < 0:
@@ -629,43 +776,46 @@ class ChartWidget(tk.Frame):
             return
 
         snapped_idx = cr.snapped_index
+        mouse_y = cr.mouse_y
         chart_vp = self._grid_renderer.get_chart_viewport()
         badges: List[PaneBadge] = []
 
-        # --- Main candlestick pane badge (price at cursor Y) ---
-        price_val = self._coord_engine.y_to_price(cr.mouse_y, chart_vp)
-        badges.append(PaneBadge(
-            badge_y=cr.mouse_y,
-            value_text=self._format_price_value(price_val),
-            pane_top=chart_vp.top,
-            pane_bottom=chart_vp.bottom,
-        ))
-
-        # --- Subplot pane badges (indicator value at snapped bar) ---
+        # Determine which pane the mouse is actually hovering over
+        active_pane = "candlestick"
         for pane_name in self._layout_engine.panes:
-            if pane_name == "candlestick":
-                continue
-            pane_vp = self._coord_engine.get_pane_viewport(pane_name)
-            if pane_vp.height <= 0:
-                continue
+            vp = self._coord_engine.get_pane_viewport(pane_name)
+            if vp.top <= mouse_y <= vp.bottom:
+                active_pane = pane_name
+                break
 
-            # Find the first indicator in this pane that has a result
-            for ind in self._indicators:
-                if ind.pane != pane_name or not ind._last_result:
-                    continue
-                # Use the first value-list as the "primary" series
-                for key, vals in ind._last_result.values.items():
-                    if snapped_idx < len(vals) and vals[snapped_idx] is not None:
-                        val = vals[snapped_idx]
-                        y = self._coord_engine.price_to_y(val, pane_vp, pane=pane_name)
-                        badges.append(PaneBadge(
-                            badge_y=y,
-                            value_text=self._format_indicator_value(val, pane_name),
-                            pane_top=pane_vp.top,
-                            pane_bottom=pane_vp.bottom,
-                        ))
-                        break  # Only first value-list per indicator
-                break  # Only first indicator per pane
+        # Only draw ONE badge — for the active pane
+        if active_pane == "candlestick":
+            price_val = self._coord_engine.y_to_price(mouse_y, chart_vp)
+            badges.append(PaneBadge(
+                badge_y=mouse_y,
+                value_text=self._format_price_value(price_val),
+                pane_top=chart_vp.top,
+                pane_bottom=chart_vp.bottom,
+            ))
+        else:
+            pane_vp = self._coord_engine.get_pane_viewport(active_pane)
+            if pane_vp.height > 0:
+                # Find the first indicator in this pane that has a result
+                for ind in self._indicators:
+                    if ind.pane != active_pane or not ind._last_result:
+                        continue
+                    for key, vals in ind._last_result.values.items():
+                        if snapped_idx < len(vals) and vals[snapped_idx] is not None:
+                            val = vals[snapped_idx]
+                            y = self._coord_engine.price_to_y(val, pane_vp, pane=active_pane)
+                            badges.append(PaneBadge(
+                                badge_y=y,
+                                value_text=self._format_indicator_value(val, active_pane),
+                                pane_top=pane_vp.top,
+                                pane_bottom=pane_vp.bottom,
+                            ))
+                            break
+                    break
 
         cr.set_pane_badges(badges)
 

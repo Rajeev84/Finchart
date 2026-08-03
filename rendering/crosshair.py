@@ -31,7 +31,7 @@ class CrosshairStyle:
     """Styling properties for crosshair rendering."""
     line_color: Color = field(default_factory=lambda: Color(149, 152, 161))
     line_width: float = 1.0
-    line_dash: Tuple[int, ...] = ()  # Empty tuple for solid lines (smoother animation)
+    line_dash: Tuple[int, ...] = (4, 4)  # Dashed line for TradingView-style appearance
     badge_bg: Color = field(default_factory=lambda: Color(54, 58, 69))
     badge_fg: Color = field(default_factory=lambda: Color(255, 255, 255))
     badge_font: Tuple[str, int] = ("Segoe UI", 9)

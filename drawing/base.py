@@ -42,6 +42,9 @@ class DrawingState:
     angle: Optional[float] = None
     pane_name: str = "candlestick"
 
+    # Position/trade data
+    quantity: float = 1.0
+
     # Legacy compatibility
     @property
     def tag(self) -> str:
@@ -74,6 +77,7 @@ class DrawingState:
             "hovered": self.hovered,
             "locked": self.locked,
             "pane_name": self.pane_name,
+            "quantity": self.quantity,
         }
 
     @classmethod
@@ -93,6 +97,7 @@ class DrawingState:
             hovered=data.get("hovered", False),
             locked=data.get("locked", False),
             pane_name=data.get("pane_name", "candlestick"),
+            quantity=data.get("quantity", 1.0),
         )
 
 

@@ -4,7 +4,7 @@ All tools are pure Python with no numpy/pandas dependencies.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, Tuple
 import math
 
 from ..core.types import Point, Color, OHLCV
@@ -49,18 +49,30 @@ class TrendLine(DrawingTool):
         (i1, p1), (i2, p2) = self.state.points[:2]
         x1, y1 = coord_engine.index_to_x(float(i1)), coord_engine.price_to_y(float(p1), vp)
         x2, y2 = coord_engine.index_to_x(float(i2)), coord_engine.price_to_y(float(p2), vp)
+
+        # Always read left-to-right so the sign is consistent regardless
+        # of which handle the user is dragging.
+        if x1 > x2:
+            x1, x2 = x2, x1
+            y1, y2 = y2, y1
+
         # Canvas Y increases downward, so invert dy for geometric angle
-        angle_rad = math.atan2(-(y2 - y1), x2 - x1)
-        angle_deg = math.degrees(angle_rad)
-        # Normalize to 0-180 for line angle display
-        if angle_deg < 0:
-            angle_deg += 180
+        dx = x2 - x1
+        dy = -(y2 - y1)
+        angle_deg = math.degrees(math.atan2(dy, dx))
+
+        # Clamp to trading-standard range (vertical lines can hit exactly ±90)
+        if angle_deg > 90:
+            angle_deg = 90
+        elif angle_deg < -90:
+            angle_deg = -90
+
         return round(angle_deg, 1)
 
     def move_endpoint(self, handle_id: str, new_index: float, new_price: float) -> None:
         idx = 0 if handle_id == "p1" else 1
         pts = list(self.state.points)
-        pts[idx] = (new_index, new_price)
+        pts[idx] = (round(new_index), new_price)  # Round X to nearest bar
         self.state.points = pts
 
     def move_whole(self, d_index: float, d_price: float) -> None:
@@ -389,7 +401,11 @@ class Rectangle(DrawingTool):
         x2 = coord_engine.index_to_x(float(idx2))
         y2 = coord_engine.price_to_y(float(p2), vp)
 
-        # Test edge hit (border)
+        # 1) Interior hit — clicking anywhere inside the rectangle selects it
+        if is_point_in_rect(px, py, x1, y1, x2, y2):
+            return True
+
+        # 2) Edge hit (border) with tolerance for handle-less selection
         tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
         return (
             is_point_near_line(px, py, x1, y1, x2, y1, tolerance=tol) or
@@ -415,20 +431,29 @@ class Rectangle(DrawingTool):
         ]
 
     def move_endpoint(self, handle_id: str, new_index: float, new_price: float) -> None:
-        handle_map = {"p1": 0, "p2": 1, "p3": 2, "p4": 3}
-        idx = handle_map.get(handle_id, 0)
+        if len(self.state.points) < 2:
+            self.state.points = [(round(new_index), new_price), (round(new_index), new_price)]
+            return
+
         pts = list(self.state.points)
-        if len(pts) < 2:
-            pts = [(new_index, new_price), (new_index, new_price)]
-        else:
-            if idx == 0:
-                pts[0] = (new_index, new_price)
-            elif idx == 1:
-                pts[1] = (new_index, pts[0][1])
-            elif idx == 2:
-                pts[1] = (new_index, new_price)
-            elif idx == 3:
-                pts[0] = (new_index, pts[1][1])
+        i0, p0 = pts[0]
+        i1, p1 = pts[1]
+
+        if handle_id == "p1":
+            # Top-left: direct control of pts[0]
+            pts[0] = (round(new_index), new_price)
+        elif handle_id == "p2":
+            # Top-right: x comes from pts[1], y comes from pts[0]
+            pts[1] = (round(new_index), p1)
+            pts[0] = (i0, new_price)
+        elif handle_id == "p3":
+            # Bottom-right: direct control of pts[1]
+            pts[1] = (round(new_index), new_price)
+        elif handle_id == "p4":
+            # Bottom-left: x comes from pts[0], y comes from pts[1]
+            pts[0] = (round(new_index), p0)
+            pts[1] = (i1, new_price)
+
         self.state.points = pts
 
     def move_whole(self, d_index: float, d_price: float) -> None:
@@ -600,3 +625,308 @@ class MarketProfileOverlay:
                 break
 
         return sorted_prices[hi_idx], sorted_prices[lo_idx]  # VAH, VAL
+
+
+class LongShort(DrawingTool):
+    """
+    TradingView-style Long/Short position shape.
+    
+    Points:
+        [0] = (entry_index, entry_price)
+        [1] = (width_index, target_price)
+        [2] = (width_index, stop_price)
+    """
+
+    def __init__(self, state: DrawingState) -> None:
+        super().__init__(state)
+        self._live_price: Optional[float] = None
+
+    def update_live_price(self, price: Optional[float]) -> None:
+        """Called by ChartWidget before each render so PnL label stays live."""
+        self._live_price = price
+
+    # ── Geometry helpers ──────────────────────────────────────────
+
+    @property
+    def entry_index(self) -> float:
+        return self.state.points[0][0] if self.state.points else 0.0
+
+    @property
+    def entry_price(self) -> float:
+        return self.state.points[0][1] if self.state.points else 0.0
+
+    @property
+    def width_index(self) -> float:
+        return self.state.points[1][0] if len(self.state.points) > 1 else self.entry_index
+
+    @property
+    def target_price(self) -> float:
+        return self.state.points[1][1] if len(self.state.points) > 1 else self.entry_price
+
+    @property
+    def stop_price(self) -> float:
+        return self.state.points[2][1] if len(self.state.points) > 2 else self.entry_price
+
+    @property
+    def is_long(self) -> bool:
+        return self.target_price >= self.stop_price
+
+    @property
+    def quantity(self) -> float:
+        try:
+            return float(self.state.label) if self.state.label else 1.0
+        except ValueError:
+            return 1.0
+
+    # ── Hit test ──────────────────────────────────────────────────
+
+    def hit_test(self, px: float, py: float, coord_engine: CoordinateEngine,
+                 viewport: Optional[Any] = None) -> bool:
+        if len(self.state.points) < 3 or self.state.locked:
+            return False
+
+        vp = viewport or coord_engine.viewport
+        ex = coord_engine.index_to_x(self.entry_index)
+        ey = coord_engine.price_to_y(self.entry_price, vp)
+        wx = coord_engine.index_to_x(self.width_index)
+        ty = coord_engine.price_to_y(self.target_price, vp)
+        sy = coord_engine.price_to_y(self.stop_price, vp)
+
+        tol = 10.0 if (self.state.hovered or self.state.selected) else 6.0
+
+        # 1) Handle hit (always, so dragging handles works even inside zones)
+        for hx, hy, hid in self.get_handles(coord_engine, vp):
+            if is_point_near_handle(px, py, hx, hy, size=8):
+                return True
+
+        # 2) Entry line
+        if is_point_near_line(px, py, ex, ey, wx, ey, tolerance=tol):
+            return True
+
+        # 3) Target zone interior
+        if is_point_in_rect(px, py, ex, ey, wx, ty):
+            return True
+
+        # 4) Stop zone interior
+        if is_point_in_rect(px, py, ex, ey, wx, sy):
+            return True
+
+        return False
+
+    # ── Handles ───────────────────────────────────────────────────
+
+    def get_handles(self, coord_engine: CoordinateEngine,
+                    viewport: Optional[Any] = None) -> List[Tuple[float, float, str]]:
+        if len(self.state.points) < 3:
+            return []
+        vp = viewport or coord_engine.viewport
+        ex = coord_engine.index_to_x(self.entry_index)
+        ey = coord_engine.price_to_y(self.entry_price, vp)
+        wx = coord_engine.index_to_x(self.width_index)
+        ty = coord_engine.price_to_y(self.target_price, vp)
+        sy = coord_engine.price_to_y(self.stop_price, vp)
+        return [
+            (ex, ey, "entry"),      # left  — entry price / index
+            (wx, ty, "target"),     # right — target level
+            (wx, sy, "stop"),       # right — stop level
+            (wx, ey, "width"),      # right — width (opposite side of entry)
+        ]
+
+    # ── Mutation ────────────────────────────────────────────────────
+
+    def move_endpoint(self, handle_id: str, new_index: float, new_price: float) -> None:
+        if len(self.state.points) < 3:
+            return
+
+        pts = list(self.state.points)
+        if handle_id == "entry":
+            pts[0] = (round(new_index), new_price)
+            # Keep width_index fixed when moving entry
+            if len(pts) > 1:
+                width_i = pts[1][0]
+                pts[1] = (width_i, pts[1][1])
+                pts[2] = (width_i, pts[2][1])
+        elif handle_id == "target":
+            width_i = pts[1][0]
+            pts[1] = (width_i, new_price)
+        elif handle_id == "stop":
+            width_i = pts[2][0]
+            pts[2] = (width_i, new_price)
+        elif handle_id == "width":
+            # Move width_index, preserve target/stop prices
+            width_i = round(new_index)
+            pts[1] = (width_i, pts[1][1])
+            pts[2] = (width_i, pts[2][1])
+
+        self.state.points = pts
+
+    def move_whole(self, d_index: float, d_price: float) -> None:
+        pts = []
+        for i, p in self.state.points:
+            pts.append((i + d_index, p + d_price))
+        self.state.points = pts
+
+    # ── Rendering ──────────────────────────────────────────────────
+
+    def render_commands(self, coord_engine: CoordinateEngine,
+                       viewport: Optional[Any] = None) -> List[DrawCommand]:
+        if len(self.state.points) < 3 or not self.state.visible:
+            return []
+
+        vp = viewport or coord_engine.viewport
+        ex = coord_engine.index_to_x(self.entry_index)
+        ey = coord_engine.price_to_y(self.entry_price, vp)
+        wx = coord_engine.index_to_x(self.width_index)
+        ty = coord_engine.price_to_y(self.target_price, vp)
+        sy = coord_engine.price_to_y(self.stop_price, vp)
+
+        cmds: List[DrawCommand] = []
+
+        # Determine direction and colors
+        if self.is_long:
+            # Long: green above entry, red below
+            target_color = "#00C853"  # green
+            stop_color = "#FF3D00"    # red
+            top_y, bottom_y = ty, sy
+        else:
+            # Short: green below entry, red above
+            target_color = "#00C853"  # green
+            stop_color = "#FF3D00"    # red
+            top_y, bottom_y = sy, ty
+
+        # 1) Entry line (dashed orange)
+        cmds.append(DrawCommand(
+            layer=Layer.DRAWING,
+            tag=f"entry_line_{self.state.id}",
+            item_type="line",
+            coords=(ex, ey, wx, ey),
+            options={
+                "fill": "#FF9800",
+                "width": 1.5,
+                "dash": (4, 4)
+            },
+            z_index=5
+        ))
+
+        # 2) Target zone (green)
+        target_rect = (ex, min(ey, ty), wx, max(ey, ty))
+        cmds.append(DrawCommand(
+            layer=Layer.DRAWING,
+            tag=f"target_zone_{self.state.id}",
+            item_type="rectangle",
+            coords=target_rect,
+            options={
+                "fill": target_color,
+                "outline": "",
+                "stipple": "gray25"
+            },
+            z_index=4
+        ))
+
+        # 3) Stop zone (red)
+        stop_rect = (ex, min(ey, sy), wx, max(ey, sy))
+        cmds.append(DrawCommand(
+            layer=Layer.DRAWING,
+            tag=f"stop_zone_{self.state.id}",
+            item_type="rectangle",
+            coords=stop_rect,
+            options={
+                "fill": stop_color,
+                "outline": "",
+                "stipple": "gray25"
+            },
+            z_index=4
+        ))
+
+        # 4) Labels
+        qty = self.quantity
+        target_pnl = (self.target_price - self.entry_price) * qty if self.is_long else (self.entry_price - self.target_price) * qty
+        stop_pnl = (self.stop_price - self.entry_price) * qty if self.is_long else (self.entry_price - self.stop_price) * qty
+        
+        # Live PnL if live price available
+        if self._live_price is not None:
+            live_pnl = (self._live_price - self.entry_price) * qty if self.is_long else (self.entry_price - self._live_price) * qty
+            pnl_text = f"PnL: {live_pnl:+.2f}"
+        else:
+            pnl_text = f"PnL: 0.00"
+
+        # Entry label (quantity + PnL)
+        entry_label = f"{qty} @ {self.entry_price:.2f}"
+        cmds.append(DrawCommand(
+            layer=Layer.DRAWING,
+            tag=f"entry_label_{self.state.id}",
+            item_type="text",
+            coords=(ex + 5, ey - 5),
+            options={
+                "text": entry_label,
+                "fill": "#FFFFFF",
+                "font": ("Segoe UI", 9, "bold"),
+                "anchor": "w"
+            },
+            z_index=6
+        ))
+
+        # PnL label (below entry)
+        cmds.append(DrawCommand(
+            layer=Layer.DRAWING,
+            tag=f"pnl_label_{self.state.id}",
+            item_type="text",
+            coords=(ex + 5, ey + 10),
+            options={
+                "text": pnl_text,
+                "fill": "#FFD700" if self._live_price else "#AAAAAA",
+                "font": ("Segoe UI", 9),
+                "anchor": "w"
+            },
+            z_index=6
+        ))
+
+        # Target label
+        target_label = f"Target: {self.target_price:.2f} ({target_pnl:+.2f})"
+        label_y = ty - 5 if self.is_long else ty + 15
+        cmds.append(DrawCommand(
+            layer=Layer.DRAWING,
+            tag=f"target_label_{self.state.id}",
+            item_type="text",
+            coords=(wx + 5, label_y),
+            options={
+                "text": target_label,
+                "fill": target_color,
+                "font": ("Segoe UI", 9),
+                "anchor": "w"
+            },
+            z_index=6
+        ))
+
+        # Stop label
+        stop_label = f"Stop: {self.stop_price:.2f} ({stop_pnl:+.2f})"
+        label_y = sy + 15 if self.is_long else sy - 5
+        cmds.append(DrawCommand(
+            layer=Layer.DRAWING,
+            tag=f"stop_label_{self.state.id}",
+            item_type="text",
+            coords=(wx + 5, label_y),
+            options={
+                "text": stop_label,
+                "fill": stop_color,
+                "font": ("Segoe UI", 9),
+                "anchor": "w"
+            },
+            z_index=6
+        ))
+
+        # 5) Selection handles
+        if self.state.selected:
+            h = 5.0
+            handles = self.get_handles(coord_engine, vp)
+            for hx, hy, hid in handles:
+                cmds.append(DrawCommand(
+                    layer=Layer.DRAWING,
+                    tag=f"handle_{self.state.id}_{hid}",
+                    item_type="oval",
+                    coords=(hx - h, hy - h, hx + h, hy + h),
+                    options={"fill": "#FFFFFF", "outline": "#000000", "width": 1},
+                    z_index=15
+                ))
+
+        return cmds

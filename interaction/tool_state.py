@@ -15,6 +15,7 @@ class ToolState(Enum):
     IDLE = auto()
     WAIT_FIRST_CLICK = auto()
     PREVIEW = auto()
+    PREVIEW_2 = auto()  # For three-click tools like LongShort
 
 
 @dataclass
