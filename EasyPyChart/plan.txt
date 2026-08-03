@@ -1,0 +1,96 @@
+# EasyPyChart Extension Plan: Layout & Interaction Managers
+
+## Constraint
+**DO NOT MODIFY** `easypychart/core.py`. The managers must build **on top** of the existing `EasyPyChart` class.
+
+## 1. Class Structure
+
+### A. LayoutManager (`layout_manager.py`)
+*Session & State Manager.*
+
+**Philosophy**:
+- "Chart only draws what is sent to it."
+- `LayoutManager` holds the "Truth".
+- **Session Scope**:
+    - **Indicators**: Persist across Symbols and Timeframes (Global).
+    - **Shapes**: Persist across Timeframes (bound to Symbol).
+    - **Subplots**: Part of Indicator configuration.
+
+**State**:
+- `global_indicators`: List of active indicators `{ 'id': 'rsi_14', 'type': 'rsi', 'params': {...}, 'subplot': 'rsi_pane' }`.
+- `symbol_drawings`: Dictionary `{ 'SYMBOL': { 'tag': shape_data } }`.
+- `current_symbol`: String.
+- `current_timeframe`: String.
+
+**Methods**:
+- `__init__(chart)`
+- **Context Switching**:
+    - `set_context(symbol, timeframe)`:
+        1.  Calls `chart.clear()`. (Or just clears internal data/drawings, keeping config?)
+            - *Note*: `chart.clear()` clears everything.
+        2.  Re-initializes `global_indicators` (Calls `chart.create_subplot`, `chart.create_series`).
+        3.  Retrieves drawings for `symbol` and calls `chart.create_...` for each.
+- **Data Injection**:
+    - `update_data(df)`: Passes data to `chart.load_data(df)`.
+- **Management**:
+    - `add_indicator(name, data_func, ...)`: Updates `global_indicators` + updates Chart.
+    - `add_shape(tag, ...)`: Updates `symbol_drawings[current_symbol]` + updates Chart.
+    - `save_session(path)`: Serializes entire state.
+    - `load_session(path)`.
+
+### B. InteractionManager (`interaction_manager.py`)
+*Event Controller & Tool State Machine.*
+
+**Responsibility**:
+- Binds to `chart.callback`.
+- Manages `get_click_cords` flows.
+- Modifies `LayoutManager` state (which then updates Chart).
+
+**Methods**:
+- `__init__(chart, layout_manager)`
+- `get_click_cords(num_points, ...)`:
+    - Draws ghost shapes on Chart (via `chart.create_...` with 'ghost' tag).
+    - capture clicks.
+    - On completion: calls `layout_manager.add_shape(...)`.
+
+---
+
+## 2. Interaction Flow Example
+
+### Scenario: Switching Symbols
+
+1.  User calls `layout.switch_symbol('NIFTY')`.
+2.  `layout` saves current temporary state if needed.
+3.  `layout` looks up `symbol_drawings['NIFTY']`.
+4.  `layout` calls `chart.clear()`.
+5.  `layout` iterates `global_indicators`:
+    - Re-creates subplots (e.g., RSI pane).
+    - *Note*: Indicators need Data. `LayoutManager` might need to trigger a data reload callback or user handles data?
+    - *Refinement*: `LayoutManager` probably shouldn't fetch data. User code:
+        ```python
+        df = get_data('NIFTY')
+        layout.set_context('NIFTY', '5m')
+        layout.update_data(df) 
+        # Indicators need to be re-calculated on new df!
+        ```
+6.  `layout` iterates `symbol_drawings['NIFTY']`:
+    - Calls `chart.create_line(...)` etc.
+
+---
+
+## 3. Implementation Steps
+
+[ ] **Step 1: Create `layout_manager.py`**
+    - Implement `LayoutManager`.
+    - Handle `indicators` (metadata only) and `drawings` (coordinates).
+    - *Note*: Actual indicator *calculation* is outside scope or must be passed in?
+        - Plan: `LayoutManager` stores "Series Definitions". When `update_data(df)` is called, it might need to re-calc? 
+        - Simpler: `LayoutManager` stores the *Layout* (panes/weights). User adds series data manually. 
+        - User Requirement: "keeps indicators between timeframes".
+        - Implies: If I have RSI pane, and I switch symbol, the RSI pane stays, but is empty until I feed it data.
+
+[ ] **Step 2: Create `interaction_manager.py`**
+    - Implement `get_click_cords`.
+
+[ ] **Step 3: Demo `test_managers.py`**
+    - Verify persistence across "mock" symbol switch.

@@ -1,0 +1,37 @@
+{
+  "global_indicators": [],
+  "subplot_configs": {
+    "candlestick": {
+      "weight": 3.0,
+      "overlay_on": null
+    }
+  },
+  "symbol_drawings": {
+    "BTCUSDT": {
+      "line_1767688012": {
+        "type": "line",
+        "points": [
+          [
+            "2025-01-01T12:06:13.571101966",
+            49704.60892696922
+          ],
+          [
+            "2025-01-01T22:37:13.653406492",
+            50540.65941999749
+          ]
+        ],
+        "fill": "#00FFFF",
+        "label": "Line",
+        "plot": "candlestick",
+        "width": 2,
+        "dash": null,
+        "kwargs": {}
+      }
+    },
+    "ETHUSDT": {}
+  },
+  "current_context": {
+    "symbol": "BTCUSDT",
+    "timeframe": "5m"
+  }
+}

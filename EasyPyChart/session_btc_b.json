@@ -1,0 +1,95 @@
+{
+  "global_indicators": [],
+  "subplot_configs": {
+    "candlestick": {
+      "weight": 3.0,
+      "overlay_on": null
+    }
+  },
+  "symbol_drawings": {
+    "ETHUSDT": {
+      "hline_1776250058691": {
+        "type": "line",
+        "points": [
+          [
+            "2026-04-15T14:37:38.636350",
+            108.00558467697648
+          ],
+          [
+            "2026-04-15T16:16:38.636350",
+            108.00558467697648
+          ]
+        ],
+        "fill": "blue",
+        "label": "ETH Support",
+        "plot": "candlestick",
+        "width": 2,
+        "dash": null,
+        "kwargs": {}
+      }
+    },
+    "BTCUSDT": {
+      "rect_1776250076561": {
+        "type": "rect",
+        "points": [
+          [
+            "2026-04-15T14:57:38.636350",
+            105.25833549548112
+          ],
+          [
+            "2026-04-15T15:17:38.636350",
+            91.49731103507817
+          ]
+        ],
+        "fill": "#00FF00",
+        "outline": null,
+        "label": "Buy Zone",
+        "plot": "candlestick",
+        "alpha": null,
+        "kwargs": {}
+      },
+      "rect_1776250078905": {
+        "type": "rect",
+        "points": [
+          [
+            "2026-04-15T14:57:38.636350",
+            105.25833549548112
+          ],
+          [
+            "2026-04-15T15:17:38.636350",
+            91.49731103507817
+          ]
+        ],
+        "fill": "#00FF00",
+        "outline": null,
+        "label": "Buy Zone",
+        "plot": "candlestick",
+        "alpha": null,
+        "kwargs": {}
+      },
+      "rect_1776250081155": {
+        "type": "rect",
+        "points": [
+          [
+            "2026-04-15T14:57:38.636350",
+            105.25833549548112
+          ],
+          [
+            "2026-04-15T15:17:38.636350",
+            91.49731103507817
+          ]
+        ],
+        "fill": "#00FF0030",
+        "outline": null,
+        "label": "Buy Zone",
+        "plot": "candlestick",
+        "alpha": null,
+        "kwargs": {}
+      }
+    }
+  },
+  "current_context": {
+    "symbol": "BTCUSDT",
+    "timeframe": "1m"
+  }
+}

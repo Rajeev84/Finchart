@@ -1,0 +1,50 @@
+{
+  "global_indicators": [],
+  "subplot_configs": {
+    "candlestick": {
+      "weight": 3.0,
+      "overlay_on": null
+    }
+  },
+  "symbol_drawings": {
+    "BTCUSDT": {
+      "hline_1776250058654": {
+        "type": "line",
+        "points": [
+          [
+            "2026-04-15T14:37:38.636350",
+            97.79793620064478
+          ],
+          [
+            "2026-04-15T16:16:38.636350",
+            97.79793620064478
+          ]
+        ],
+        "fill": "red",
+        "label": "BTC Resistance",
+        "plot": "candlestick",
+        "width": 2,
+        "dash": null,
+        "kwargs": {}
+      },
+      "shape_1": {
+        "type": "text",
+        "points": [
+          [
+            "2026-04-15T15:27:38.636350",
+            105.25833549548112
+          ]
+        ],
+        "text": "Analysis A",
+        "fill": "white",
+        "label": "Note",
+        "plot": "candlestick",
+        "kwargs": {}
+      }
+    }
+  },
+  "current_context": {
+    "symbol": "BTCUSDT",
+    "timeframe": "1m"
+  }
+}

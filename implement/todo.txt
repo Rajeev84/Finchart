@@ -1,0 +1,670 @@
+================================================================================
+PORTING EASYPYCHART (tkinter) TO FINCHART â€” API COMPATIBILITY ANALYSIS
+================================================================================
+Date: 2026-08-03
+Analyst: Codebase Comparison
+Status: COMPLETE â€” Findings & Implementation Roadmap
+================================================================================
+
+------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+------------------------------------------------------------------------------
+
+  Verdict: NOT DIRECTLY COMPATIBLE.
+
+  EasyPyChart and Finchart share the same rendering backend (Tkinter Canvas)
+  and similar domain concepts (candlesticks, drawing tools, indicators, subplots),
+  but their PUBLIC APIs are fundamentally incompatible at every integration
+  layer:
+
+    - Constructor signatures differ
+    - Data models differ (pandas DataFrame vs. List[OHLCV])
+    - Drawing creation APIs differ (direct create_* vs. DrawingState + add_drawing)
+    - Coordinate systems differ (datetime+price vs. bar_index+price)
+    - Color models differ (hex strings vs. Color dataclass)
+    - Event systems differ (simple callback vs. TradingView-style trigger)
+    - Rendering pipelines differ (immediate mode vs. retained mode)
+
+  APPROACH: Rather than building an API bridge/shim, we implement the missing
+  EasyPyChart-compatible features DIRECTLY in Finchart, preserving Finchart's
+  existing modular, TradingView-style architecture. This makes Finchart
+  natively support the capabilities the tkinter trading software needs:
+    - Pattern search all shapes (get_area_xy / get_all_shapes)
+    - Layout & session save/load (per-symbol, per-timeframe)
+    - DataFrame-based data loading with datetime support
+    - Hex-string color acceptance in drawing APIs
+
+  The single most valuable EasyPyChart feature that Finchart is MISSING is the
+  "pattern search all shapes" capability (get_area_xy / get_all_shapes),
+  which must be IMPLEMENTED DIRECTLY in Finchart.
+
+------------------------------------------------------------------------------
+2. SIDE-BY-SIDE API COMPARISON (Key Differences)
+------------------------------------------------------------------------------
+
+  See the full 2.1-2.11 breakdown in prior analysis. Summary of gaps:
+
+  +---------------------------------+---------+
+  | Subsystem                       | Status  |
+  +---------------------------------+---------+
+  | Constructor / Init              | DIFF    |
+  | Data loading (DataFrame)        | DIFF    |
+  | Drawing creation API            | DIFF    |
+  | Coordinate system (datetime)    | DIFF    |
+  | Color model (hex vs Color)      | DIFF    |
+  | Rendering pipeline              | DIFF    |
+  | Event system                    | PARTIAL |
+  | Indicators                      | DIFF    |
+  | Shape selection/drag/resize     | PARTIAL |
+  | Session persistence             | MISSING |
+  | Multi-symbol context switching  | MISSING |
+  | Market Profile (TPO) rendering  | MISSING |
+  | Crosshair                       | OK      |
+  | Zoom/Pan                        | OK      |
+  | Grid/axes rendering             | OK      |
+  | Subplot layout (weight-based)   | OK      |
+  | Drawing tools (line/rect/etc)   | OK      |
+  | Pattern search all shapes       | MISSING |
+  +---------------------------------+---------+
+
+  LEGEND:
+    DIFF    = API signature/semantics differ â€” must implement compat layer
+    PARTIAL = Exists but needs enhancement
+    MISSING = Feature does not exist in Finchart
+    OK      = Compatible enough, no changes needed
+
+------------------------------------------------------------------------------
+3. PATTERN SEARCH / ALL SHAPES FEATURE ANALYSIS
+------------------------------------------------------------------------------
+
+3.1  WHAT IS THE "PATTERN SEARCH ALL SHAPES" FEATURE?
+--------------------------------------------------------
+
+  The user described "a feature for pattern search all shapes which can be
+  useful to spot particular shapes created by a tool strategy." This maps to
+  EasyPyChart's ability to:
+    1. Enumerate ALL drawings on the chart
+    2. Extract structured coordinate data for each shape
+    3. Classify shapes by type (hline, vline, line, rect, text)
+    4. Use this data for pattern matching/analysis â€” e.g., a strategy
+       scanning all drawn trend lines for specific angle patterns, or all
+       rectangles for support/resistance zones
+
+  This is the bridge between user-drawn annotations and programmatic strategy
+  analysis â€” essential for trading software that reads back user drawings for
+  automated decision-making.
+
+3.2  EASYPYCHART IMPLEMENTATION
+--------------------------------------------------------
+
+  a) chart.drawings â€” dict of all shapes:
+      {tag: {'type': str, 'points': [(dt, price), ...], 'fill': hex, 'label': str,
+             'plot': str, 'width': int, 'dash': tuple|None, 'kwargs': {}}}
+     - Public attribute (directly accessible)
+     - Keys are string tags (e.g., 'hline_1234567', 'line_1234567')
+     - Points are (Datetime, price) tuples
+
+  b) chart.get_area_xy(tag) â€” IMPLEMENTED (core.py lines 667-738):
+      Returns: {'tag': str, 'shape': str, 'coordinates': [...], ...}
+      - Classifies shape type:
+        - line where price1==price2 -> 'hline'
+        - line where dt1==dt2       -> 'vline'
+        - line otherwise            -> 'aline' (angled)
+      - rectangle -> returns closed polygon [(x1,y1),(x2,y1),(x2,y2),(x1,y2)]
+      - text      -> {'tag', 'shape': 'text', 'coordinates': [(dt,price)], 'text': str}
+      - Returns None if tag not in drawings
+
+  c) chart.get_all_shapes() â€” DOCUMENTED BUT NOT IMPLEMENTED:
+      Documented in README_REFERENCE.rst (lines 228-236):
+        "get_all_shapes() â€” Returns a list of all active shapes with their
+        coordinates. Returns: [{'tag': '...', 'coordinates': ...}, ...]"
+      BUT: search for "def get_all_shapes" in all .py files â†’ 0 results.
+      The method is NOT implemented in core.py. It is only DOCUMENTED.
+
+  d) list_all_shapes() â€” DEMO-ONLY helper (test_drawing_tools.py, lines 129-137):
+      A manual function that iterates chart.drawings.keys() and calls
+      chart.get_area_xy(tag) for each. NOT a chart method.
+      This is the actual working pattern for "search all shapes" in EasyPyChart.
+
+  CONCLUSION: EasyPyChart's "pattern search all shapes" = iterate chart.drawings
+  (public dict) + call get_area_xy(tag) per shape. The get_all_shapes() method
+  is aspirational documentation, not implemented code. But get_area_xy() IS
+  the implemented core capability.
+
+3.3  FINCHART IMPLEMENTATION (CURRENT STATE)
+--------------------------------------------------------
+
+  Finchart has NO equivalent feature:
+    - chart._drawings â€” dict of DrawingState objects: {id: DrawingState}
+      (PRIVATE, prefixed with _ â€” not part of public API)
+    - chart._drawing_tools â€” dict of DrawingTool instances: {id: DrawingTool}
+      (PRIVATE)
+    - DrawingState has: points, tool_type, label, color, width, style, fill,
+      pane_name, quantity, visible, selected, hovered, locked
+    - DrawingState.to_dict() â€” serialization but coordinates are raw
+      (bar_index, price) tuples, NOT datetime
+    - NO get_area_xy() method on ChartWidget
+    - NO get_all_shapes() method on ChartWidget
+    - NO public method to enumerate drawings with structured coordinates
+
+  To "search all shapes" in Finchart currently requires:
+    for shape_id, state in chart._drawings.items():
+        print(state.tool_type, state.points, state.label)
+    # But this accesses private API â€” not safe for external strategy code
+
+3.4  PATTERN SEARCH COMPARISON SUMMARY
+--------------------------------------------------------
+
+  +-------------------------------+----------------------+-----------------------+
+  | Capability                    | EasyPyChart          | Finchart              |
+  +-------------------------------+----------------------+-----------------------+
+  | Enumerate all drawings        | chart.drawings (dict)| chart._drawings (dict)|
+  |                               | public               | PRIVATE               |
+  +-------------------------------+----------------------+-----------------------+
+  | Get coords for one shape      | get_area_xy(tag)     | NONE                  |
+  |                               | IMPLEMENTED          |                       |
+  +-------------------------------+----------------------+-----------------------+
+  | Get coords for ALL shapes     | get_all_shapes()     | NONE                  |
+  |                               | DOCUMENTED NOT IMPL. |                       |
+  +-------------------------------+----------------------+-----------------------+
+  | Point format                  | (datetime, price)    | (bar_index, price)    |
+  +-------------------------------+----------------------+-----------------------+
+  | Shape type classification     | get_area_xy infers   | tool_type stored      |
+  |                               | hline/vline/aline    | directly              |
+  +-------------------------------+----------------------+-----------------------+
+  | Filter by type                | iterate + check      | iterate + check       |
+  |                               | 'shape' field        | tool_type             |
+  +-------------------------------+----------------------+-----------------------+
+
+  WORKING PATTERN in EasyPyChart (from test_drawing_tools.py):
+    for tag in chart.drawings.keys():
+        coords = chart.get_area_xy(tag)
+        if coords:
+            print(f"{tag}: {coords['shape']}")
+            print(f"  -> {coords['coordinates']}")
+
+3.5  WHY THIS MATTERS FOR TRADING STRATEGY AUTOMATION
+--------------------------------------------------------
+
+  The "pattern search all shapes" capability is CRITICAL for porting a tkinter
+  trading software because:
+
+  1. TRADING STRATEGIES READ USER DRAWINGS: A strategy ("tool strategy") often
+     needs to scan all user-drawn shapes to identify patterns â€” e.g., "find all
+     horizontal support lines above current price" or "detect rectangles that
+     represent trading ranges."
+
+  2. EasyPyChart's get_area_xy() ALREADY provides structured coordinate
+     extraction: it classifies shape type (hline vs. vline vs. angled line),
+     converts datetime anchors to indices, and returns polygon coordinates for
+     rectangles. This is exactly what a pattern-matching engine needs.
+
+  3. Finchart's DrawingState stores points as (bar_index, price) â€” the data IS
+     there, but there is NO public method to extract it in a structured,
+     classified format. A strategy would have to reach into private internals.
+
+  4. The datetime-to-bar-index conversion is needed: EasyPyChart drawings
+     anchor on datetime values; Finchart drawings anchor on bar indices.
+     The get_area_xy/get_all_shapes implementation should optionally convert
+     bar indices back to timestamps for strategy readability.
+
+------------------------------------------------------------------------------
+4. DETAILED COMPATIBILITY MATRIX
+------------------------------------------------------------------------------
+
+  +---------------------------------+---------+---------+------------------------+
+  | Subsystem                       | Finchart| Change  | TradingView-Grade?     |
+  |                                 | Status  | Needed  | After Implementation   |
+  +---------------------------------+---------+---------+------------------------+
+  | Constructor / Init              | DIFF    | Enhance | YES (add config dict)  |
+  | Data loading (DataFrame)        | PARTIAL | Enhance | YES (add load_data)    |
+  | Drawing creation API            | PARTIAL | Enhance | YES (add create_*)     |
+  | Coordinate (datetime drawings)  | MISSING | Implement| YES                   |
+  | Color (hex string w/ alpha)     | PARTIAL | Enhance | YES (accept hex)       |
+  | Rendering pipeline              | OK      | No      | YES (retained mode OK) |
+  | Event system                    | PARTIAL | Enhance | YES (callback compat)  |
+  | Indicators                      | PARTIAL | Enhance | YES (create_series)    |
+  | Shape selection/drag/resize     | OK      | No      | YES                    |
+  | Session persistence             | MISSING | Implement| YES (save/load)      |
+  | Multi-symbol context switching  | MISSING | Implement| YES (context mgr)    |
+  | Market Profile (TPO) rendering  | MISSING | Impl.*  | YES* (if needed)       |
+  | Crosshair                       | OK      | No      | YES                    |
+  | Zoom/Pan                        | OK      | No      | YES                    |
+  | Grid/axes rendering             | OK      | No      | YES                    |
+  | Subplot layout (weight)         | OK      | No      | YES                    |
+  | Drawing tools (line/rect/etc)   | OK      | No      | YES                    |
+  | Pattern search all shapes       | MISSING | Implement| YES (get_area_xy)    |
+  +---------------------------------+---------+---------+------------------------+
+
+  (*) TPO rendering: lower priority â€” can be added after core API parity.
+
+  SUMMARY: Finchart's core architecture is sound and TradingView-grade for
+  rendering, interaction, and drawing tools. The gaps are in DATA LOADING
+  flexibility, PERSISTENCE, COORDINATE system (datetime support), and the
+  PATTERN SEARCH capability. These should be implemented natively.
+
+------------------------------------------------------------------------------
+5. RECOMMENDATIONS â€” DIRECT IMPLEMENTATION IN FINCHART
+------------------------------------------------------------------------------
+
+  Rather than building a side-by-side API bridge, implement the missing features
+  directly in Finchart's existing class hierarchy. This preserves Finchart's
+  modular, TradingView-style architecture while adding EasyPyChart-compatible
+  capabilities. Each enhancement is a thin additive layer â€” no monkey-patching,
+  no parallel codebase.
+
+5.1  FEATURE 1: PATTERN SEARCH â€” get_area_xy() + get_all_shapes()
+---------------------------------------------------------------
+
+  Add to ChartWidget (api/widget.py):
+    - get_area_xy(shape_id: str) -> dict
+        Returns: {'id': str, 'tool_type': str, 'shape': str,
+                  'coordinates': [(x, y), ...], 'label': str,
+                  'color': str(hex), 'width': float, 'pane': str, ...}
+        - Classifies shape subtype:
+          * hline: all points share same price -> 'hline'
+          * vline: all points share same index -> 'vline' (if supported)
+          * trendline/angleline: two distinct points -> 'line'/'aline'
+          * rectangle: four points -> 'rectangle' (returns closed polygon)
+          * longshort: multi-point -> 'longshort'
+        - Optionally converts bar_index -> timestamp via
+          DataStore.get_timestamp_from_index() for human-readable output
+        - Returns None if shape_id not found
+
+    - get_all_shapes() -> list[dict]
+        Iterates self._drawings, calls get_area_xy() for each.
+        Returns: [{'id': str, 'tool_type': str, 'shape': str,
+                   'coordinates': [...], 'label': str}, ...]
+        Filters out internal/ghost shapes if needed.
+
+    - drawings property (read-only):
+        Returns a list of shape IDs (or a copy of the id->DrawingState keys)
+        so external code can enumerate without touching private internals.
+
+  Add to DrawingState (drawing/base.py):
+    - to_export_dict(coord_engine=None, data_store=None) -> dict
+        Returns coordinates with optional datetime/timestamp conversion.
+        Compatible with EasyPyChart's get_area_xy() output format.
+
+  Add to DrawingTool ABC (drawing/base.py):
+    - get_area_xy(coord_engine, viewport) -> dict
+        Abstract method: each tool extracts its own structured coordinates.
+
+  Implement in each tool (drawing/tools.py):
+    - TrendLine.get_area_xy() â€” returns line coords, classifies as hline/vline/aline
+    - HorizontalLine.get_area_xy() â€” returns 'hline' with single price
+    - VerticalLine.get_area_xy() â€” returns 'vline' with single index (if impl.)
+    - AngleLine.get_area_xy() â€” returns 'aline' with angle info
+    - Rectangle.get_area_xy() â€” returns closed 4-point polygon
+    - LongShortPosition.get_area_xy() â€” returns entry/stop/target coords
+
+5.2  FEATURE 2: SESSION PERSISTENCE (save_session / load_session + Layout)
+------------------------------------------------------------------------
+
+  EasyPyChart's LayoutManager provides:
+    - Per-symbol drawings dict: {SYMBOL: {tag: shape_data}}
+    - Subplot configs: {name: {weight, overlay_on}}
+    - Global indicators: list of {id, type, params, subplot}
+    - View states: {(symbol, timeframe): {scale_x, offset_from_end}}
+    - JSON file format with datetime serialization
+
+  Finchart currently has basic save_session/load_session (drawings only).
+  Enhance to be TradingView-grade:
+
+  Add to ChartWidget (api/widget.py):
+    - save_session(filepath) -> dict
+        Enhanced format including:
+        - drawings: [{id, tool_type, points, color, width, style, fill,
+                       label, pane_name, quantity, locked}]
+        - indicators: [{type, params, pane}]  (currently NOT saved!)
+        - layout: [{name, weight, overlay_on}]  subplot configurations
+        - view_state: {bar_spacing, offset, price_min, price_max} per pane
+        - current: {symbol, timeframe}  (for context restoration)
+        - theme: serialized theme name/colors
+
+    - load_session(filepath) -> bool
+        Restores drawings, indicators, layout, and view state.
+        Reconstructs DrawingState + DrawingTool from serialized data.
+        Reconstructs Indicator objects from type+params.
+        Restores LayoutEngine panes and CoordinateEngine zoom/pan.
+
+  Add to ChartWidget:
+    - set_context(symbol, timeframe) -> switch active symbol/timeframe
+        Saves current drawings + view state for current symbol.
+        Restores drawings + view state for target symbol.
+        If no data for target symbol, calls data provider callback or no-op.
+    - get_drawings() -> dict: returns all drawings as export dicts
+    - get_symbol_drawings(symbol) -> dict: per-symbol drawings
+
+  Add a SessionManager class (new file: core/session.py):
+    - Manages per-symbol drawing state (like EasyPyChart's LayoutManager)
+    - Manages per-symbol/timeframe view states (zoom + scroll position)
+    - Manages global indicator configs (persist across symbols)
+    - Manages subplot layout configs
+    - save_session(filepath) / load_session(filepath) / load_symbol_session()
+    - set_context(symbol, timeframe) / clear_all_drawings() /
+      add_drawing(tag, shape_type, points, **kwargs) â€” EasyPyChart-compatible
+
+  This makes Finchart's persistence TradingView-grade: multi-symbol sessions
+  with per-symbol drawings, global indicators, and view state preservation.
+
+5.3  FEATURE 3: DATA LOADING WITH DATETIME SUPPORT
+---------------------------------------------------------------
+
+  EasyPyChart's load_data(df) accepts a pandas DataFrame with a 'Datetime'
+  column and handles normalization automatically. Finchart's set_data() does
+  accept DataFrames but stores OHLCV with float timestamps, and has no
+  datetime-to-index interpolation for drawings.
+
+  Enhance:
+    - Keep set_data(List[OHLCV]) as the canonical method
+    - Add load_data(df: pd.DataFrame) alias on ChartWidget that:
+      - Detects 'Datetime' or 'Date' column, converts to Unix timestamps
+      - Calls set_data() with normalized OHLCV list
+      - Stores the datetime list for reverse lookup (timestamp -> datetime)
+    - Add DataStore.get_datetime_from_index(idx) -> datetime
+      (interpolated, like EasyPyChart's get_time_from_index)
+    - Add DataStore.get_index_from_datetime(dt, interpolate=True) -> float
+      (interpolated, like EasyPyChart's get_index_from_time)
+    - Add CoordinateEngine.time_to_index(ts) and index_to_timestamp(idx)
+      convenience wrappers delegating to DataStore
+
+5.4  FEATURE 4: EASYPYCHART-COMPATIBLE CONVENIENCE METHODS
+---------------------------------------------------------------
+
+  Add EasyPyChart-style drawing creation methods to ChartWidget so existing
+  trading software code can call them directly:
+
+    - create_hline(price, color, label, width=2, dash=None, tags=None) -> id
+    - create_vline(dt_or_index, color, label, width=1, dash=None, tags=None) -> id
+    - create_line(dt1, price1, dt2, price2, color, label, width=2, dash=None) -> id
+    - create_aline(dt1, price1, dt2, price2, color, label, width=2) -> id
+    - create_rectangle(dt1, price1, dt2, price2, fill_color, label, outline_color) -> id
+    - create_text(dt, price, text, color, label) -> id
+    - delete_shape(tag_or_id) — accepts both EasyPyChart tags and Finchart IDs
+    - move_shape(shape_id, dx_bars, dy_price)
+    - drawings property — public read-only access to shape IDs
+
+  These methods:
+    - Accept datetime objects OR bar indices for the X coordinate
+      (auto-detect and convert via DataStore)
+    - Accept hex color strings (4/6/8-digit) + dash tuples directly
+    - Internally build DrawingState and call add_drawing()
+    - Return a string ID that can be used with get_area_xy() / delete_shape()
+
+5.5  FEATURE 5: COLOR MODEL FLEXIBILITY
+---------------------------------------------------------------
+
+  Allow hex string color specification throughout Finchart's drawing API:
+    - Extend Color.from_hex() to handle 8-digit RRGGBBAA (currently only
+      6-digit). Parse alpha channel and set Color.a accordingly.
+    - Add a parse_color() utility that accepts Color objects, hex strings,
+      or named colors, returning a Color.
+    - Use parse_color() in all drawing tool constructors and add_drawing().
+
+5.6  FIX: PRE-EXISTING FINCHART BUGS (from implement/task.md & example.txt)
+---------------------------------------------------------------
+
+  [ ] Bug 1: Drawing tools ignore pane price scale
+      - File: drawing/tools.py — all price_to_y() calls omit the pane parameter,
+        defaulting to "candlestick"
+      - Fix: pass self.state.pane_name to price_to_y() in render_commands()
+        and hit_test() for every tool (TrendLine, HorizontalLine, Rectangle,
+        AngleLine, VerticalLine, LongShortPosition)
+      - File: drawing/base.py — DrawingTool.render_commands() signature should
+        accept viewport and use it consistently
+
+  [ ] Bug 2: Viewport mismatch in controller.py
+      - File: interaction/controller.py — _on_mouse_down uses self._coord.viewport
+        (full canvas) instead of the chart viewport (inset by 25px for time axis)
+      - Fix: compute chart_vp = grid_renderer.get_chart_viewport() and pass
+        to y_to_price(), hit_test(), get_handles()
+      - Fix: is_point_near_handle(tolerance=8) -> size=8 keyword mismatch
+
+  [ ] Bug 3: RSI/MACD bypass per-pane price scale
+      - File: indicators/standard.py (already partially fixed — RSI now uses
+        price_to_y(val, vp, self.pane), MACD uses self.pane)
+      - Verify Volume indicator is the reference pattern and apply consistently
+
+5.7  INDICATOR INDEPENDENCE ANALYSIS (EasyPyChart vs Finchart)
+---------------------------------------------------------------
+
+  EASYPYCHART PHILOSOPHY — NO BUILT-IN INDICATORS, PURE SUBPLOT RENDERING:
+  EasyPyChart does NOT ship with indicator classes (no RSI/MACD/SMA objects).
+  Instead, it provides a single generic method:
+
+    chart.create_series(plot_name, data, color, type, label, thickness)
+
+  - 'plot_name': target subplot ('candlestick' for main, 'rsi_pane' for sub)
+  - 'data': a list/Series of RAW pre-computed values (length matches OHLCV bars)
+  - 'type': 'line', 'histogram', or 'area'
+  - The chart only RENDERS the data — it does NOT know or care what the values
+    represent. The indicator CALCULATION is done entirely by external code
+    (the user's scanner/def_scanner.py module).
+
+  Example from demo_fullfeatures.py (EasyPyChart):
+    close = df["Close"]
+    sma20 = close.rolling(20).mean()     # computed externally
+    chart.create_series("candlestick", sma20, color="#FFCC33",
+                        thickness=2, label="SMA 20")
+
+    rsi14 = compute_rsi(close)            # computed externally in def_scanner.py
+    chart.create_series("rsi", rsi14, color="#35D6A6",
+                        thickness=2, label="RSI 14")
+
+  Key points:
+    - Indicators are EXTERNAL computations plotted as generic series
+    - The chart has NO hardcoded indicator type checks whatsoever
+    - Subplot creation (create_subplot) and series plotting (create_series)
+      are fully decoupled
+    - Any custom scanner/strategy can compute any indicator and plot it
+    - The only "type" the chart knows is render style: 'line', 'histogram', 'area'
+    - Series updates use a fluent interface: chart.plot("SMA 20").update(new_data)
+
+  FINCHART APPROACH — BUILT-IN INDICATOR CLASSES WITH HARDCODED CHECKS:
+  Finchart ships with Indicator subclasses (SMA, EMA, RSI, MACD, BollingerBands,
+  Volume), each implementing calculate() + render_commands(). BUT the widget.py
+  has HARDCODED checks that tie specific behavior to specific class names and
+  pane names, making it impossible to add truly custom indicators without
+  modifying the widget:
+
+  HARDCODED CHECKS IN widget.py:
+    1. Line 205: indicator.__class__.__name__ == "RSI"
+       -> Sets PriceScale.fixed_range = True and price range to (0, 100)
+       PROBLEM: Only "RSI" class gets fixed range. A custom RSI-like indicator
+       with a different class name won't get its fixed range set.
+
+    2. Line 211: indicator.__class__.__name__ == "Volume"
+       -> Placeholder (no action, but the class-name check is still there)
+
+    3. Line 707: ind.pane == "volume"
+       -> Forces p_min = 0.0 (volume bars grow upward from zero)
+
+    4. Line 716: ind.pane == "macd"
+       -> Forces symmetric range around zero (max_abs = max(|min|, |max|))
+
+    5. Line 891: pane_name == "volume"
+       -> Uses M/B/K shorthand formatting for crosshair badge
+
+  GAPS VS EASYPYCHART:
+    - No create_series() method: must subclass Indicator to plot anything
+    - No plot().update() fluent interface
+    - Class-name checks prevent custom indicators from getting pane-specific
+      scaling (fixed ranges, zero-baseline, symmetric ranges)
+    - IndicatorResult only stores 'values' dict — no metadata for pane scaling
+
+  RECOMMENDATION: Make indicators self-describing via metadata on the base class,
+  so the widget reads properties GENERically instead of hardcoding class names.
+  See Section 6.9 for implementation plan.
+
+6. IMPLEMENTATION TODO (DIRECT FINCHART ENHANCEMENT)
+------------------------------------------------------------------------------
+
+  [ ] 6.1  FIX PRE-EXISTING DRAWING/INTERACTION BUGS
+      [ ] Pass pane parameter to all price_to_y() / y_to_price() calls
+            in drawing/tools.py (TrendLine, HorizontalLine, VerticalLine,
+            AngleLine, Rectangle, LongShortPosition)
+      [ ] Fix DrawingTool ABC render_commands() / hit_test() signatures
+            to accept and propagate viewport + pane correctly
+            (file: drawing/base.py)
+      [ ] Fix _on_mouse_down viewport mismatch in interaction/controller.py:
+            compute chart_vp from GridRenderer and use it for coordinate
+            conversions instead of self._coord.viewport
+      [ ] Fix is_point_near_handle(tolerance=8) -> size=8 keyword argument
+            mismatch in interaction/controller.py
+      [ ] Ensure RSI/MACD/Volume all use price_to_y(val, vp, pane=self.pane)
+            consistently and set per-pane PriceScale with fixed_range for RSI
+
+  [ ] 6.2  IMPLEMENT PATTERN SEARCH: get_area_xy() + get_all_shapes()
+      [ ] Add abstract get_area_xy(coord_engine, viewport) -> dict to
+            DrawingTool ABC (drawing/base.py)
+      [ ] Implement get_area_xy() in each drawing tool (drawing/tools.py):
+          - TrendLine: classify as hline/vline/trendline, return coords
+          - HorizontalLine: return 'hline' with price + converted index range
+          - VerticalLine: return 'vline' with index
+          - AngleLine: return 'angleline' with coords + angle
+          - Rectangle: return 'rectangle' with 4-point closed polygon
+          - LongShortPosition: return 'longshort' with entry/stop/target coords
+      [ ] Add to_export_dict() / to_summary() to DrawingState (drawing/base.py)
+            — returns {id, tool_type, shape, coordinates, label, color_hex, ...}
+      [ ] Add get_area_xy(shape_id) -> dict to ChartWidget (api/widget.py)
+            — dispatches to the DrawingTool's get_area_xy(), converts
+              bar_index -> timestamp if data_store is available
+      [ ] Add get_all_shapes() -> list[dict] to ChartWidget (api/widget.py)
+            — iterates all drawings, returns export dicts
+      [ ] Add 'drawings' read-only property to ChartWidget (api/widget.py)
+            — returns list of shape IDs (replaces need to access _drawings)
+      [ ] Support optional timestamp conversion in get_area_xy output:
+      [ ] Write unit test: draw shapes, call get_all_shapes(), verify output format
+
+  [ ] 6.3  IMPLEMENT SESSION PERSISTENCE (save_session / load_session + Layout)
+      [ ] Create core/session.py — SessionManager class:
+          - __init__(chart_widget)
+          - _symbol_drawings: {symbol: {id: DrawingState}}  # per-symbol shapes
+          - _global_indicators: list of {id, type, params, pane}
+          - _subplot_configs: {name: {weight, overlay_on}}
+          - _view_states: {(symbol, timeframe): {bar_spacing, offset, price_min, price_max}}
+          - _datetime_map: {index: datetime} for reverse coordinate lookup
+          - set_context(symbol, timeframe)
+          - save_session(filepath) -> JSON with drawings + indicators + layout + view
+          - load_session(filepath) -> restores all above
+          - load_symbol_session(symbol, filepath) -> drawings only
+          - save_layout(filepath) -> indicators + subplot configs only
+          - load_layout(filepath)
+          - add_drawing(tag, shape_type, points, **kwargs)
+          - remove_drawing(tag)
+          - clear_all_drawings()
+          - get_drawings() -> dict of current symbol's drawings
+          - _sync_from_chart() — pull current chart drawings into session store
+      [ ] Add SessionManager integration to ChartWidget (api/widget.py):
+          - chart.session = SessionManager(chart)  (lazy init or constructor)
+          - chart.set_context(symbol, timeframe)
+          - chart.save_session(filepath) / chart.load_session(filepath)
+          - chart.save_layout(filepath) / chart.load_layout(filepath)
+          - Wire drawing add/remove to notify SessionManager
+      [ ] Enhance ChartWidget.save_session/load_session to include
+          indicators + layout + view_state (currently drawings only)
+      [ ] Serialize DrawingState with optional datetime anchors:
+          - Store datetime alongside bar_index for round-trip fidelity
+          - Serialize Color as hex string with alpha
+      [ ] Write test: create drawings + indicators, save_session, load_session,
+            verify all restored correctly
+
+  [ ] 6.4  IMPLEMENT DATETIME DATA LOADING
+      [ ] Add load_data(df: pd.DataFrame) convenience alias to ChartWidget:
+          - Detect 'Datetime'/'Date'/'timestamp' column
+          - Convert to Unix timestamps
+          - Call set_data(List[OHLCV])
+          - Store datetime list on DataStore for reverse lookup
+      [ ] Add get_datetime_from_index(idx) -> datetime to DataStore
+          (interpolated like EasyPyChart's get_time_from_index)
+      [ ] Add get_index_from_datetime(dt) -> float to DataStore
+          (interpolated like EasyPyChart's get_index_from_time)
+      [ ] Add CoordinateEngine.time_to_index(ts) and index_to_timestamp(idx)
+          convenience wrappers
+      [ ] Add timestamp<->datetime conversion to get_area_xy output
+
+  [ ] 6.5  IMPLEMENT EASYPYCHART-COMPATIBLE DRAWING METHODS
+      [ ] Add convenience methods to ChartWidget (api/widget.py):
+          - create_hline(price, color=,label=,width=,dash=,tags=) -> id
+          - create_vline(dt_or_index, color=,label=,width=,dash=,tags=) -> id
+          - create_line(dt1,price1, dt2,price2, color=,label=,width=,dash=) -> id
+          - create_aline(dt1,price1, dt2,price2, color=,label=,width=) -> id
+          - create_rectangle(dt1,price1, dt2,price2, fill_color=,label=,
+                             outline_color=) -> id
+          - create_text(dt, price, text, color=,label=) -> id
+          - delete_shape(tag_or_id) — accepts both tag and id
+          - move_shape(shape_id, dx_bars, dy_price)
+      [ ] Auto-detect datetime vs. bar_index for X coordinate arguments
+      [ ] Accept hex color strings (4/6/8-digit) + dash tuples directly
+      [ ] Internally build DrawingState and call add_drawing()
+      [ ] Return a string ID that can be used with get_area_xy() / delete_shape()
+
+  [ ] 6.6  ENHANCE COLOR MODEL (hex string acceptance everywhere)
+      [ ] Extend Color.from_hex() to handle 8-digit RRGGBBAA
+            (currently only 6-digit in finchart/core/types.py)
+      [ ] Add parse_color(value) utility accepting Color|str|tuple
+            (finchart/utils/ or finchart/core/types.py)
+      [ ] Use parse_color() in all drawing tool constructors + add_drawing()
+
+  [ ] 6.7  MARKET PROFILE (TPO) -- OPTIONAL LOWER PRIORITY
+      [ ] Finchart has MarketProfileOverlay with calculate_poc() /
+            calculate_value_area() but NO rendering
+      [ ] If trading software needs TPO visualization, implement
+            MarketProfileOverlay.render_commands() in the overlay module
+      [ ] Defer until core API parity is achieved
+      [ ] Mark as optional in migration plan
+
+  [ ] 6.8  INTEGRATION & TESTING
+      [ ] Run existing demo_drawings.py + demo_fullfeatures.py after changes
+      [ ] Create test_all_shapes_api.py -- tests get_area_xy + get_all_shapes
+      [ ] Create test_session_persistence.py -- tests save/load round-trip
+      [ ] Create test_datetime_loading.py -- tests DataFrame load_data
+      [ ] Create test_compat_methods.py -- tests create_hline/vline/etc
+      [ ] Create test_indicator_independence.py -- tests custom indicators
+      [ ] Verify no regressions in existing ChartWidget behavior
+
+  [ ] 6.9  INDICATOR INDEPENDENCE (make Finchart like EasyPyChart scanner.py)
+      [ ] Analyze all hardcoded checks in widget.py:
+          - Line 205: indicator.__class__.__name__ == "RSI"  (fixed_range)
+          - Line 211: indicator.__class__.__name__ == "Volume" (volume pane)
+          - Line 707: ind.pane == "volume"  (p_min = 0.0)
+          - Line 716: ind.pane == "macd"  (symmetric range)
+          - Line 891: pane_name == "volume"  (M/B/K formatting)
+      [ ] Move hardcoded pane logic into Indicator metadata in base.py:
+          - Add indicator-level attributes: fixed_range (Tuple[float,float]),
+            zero_based (bool), symmetric_range (bool), value_format (str)
+          - Each built-in indicator declares its own metadata in __init__
+          - Example: RSI sets fixed_range=(0,100), Volume sets zero_based=True,
+            MACD sets symmetric_range=True
+      [ ] Remove hardcoded class-name checks from add_indicator() in widget.py:
+          - Replace __class__.__name__ == "RSI" with indicator.fixed_range
+          - Replace __class__.__name__ == "Volume" with indicator.zero_based
+      [ ] Remove hardcoded pane-name checks from _update_price_scale() in widget.py:
+          - Replace ind.pane == "volume" with indicator.zero_based
+          - Replace ind.pane == "macd" with indicator.symmetric_range
+      [ ] Add create_series(plot_name, data, color, type, label) to ChartWidget:
+          - EasyPyChart-compatible raw series plotting (no Indicator class needed)
+          - Auto-creates subplot pane if missing
+          - Accepts list/Series of raw values
+          - Renders as line/histogram/area via SeriesRenderer
+      [ ] Add plot(name) -> SeriesHandle with .update(data) method:
+          - Fluent interface for updating an existing series by label
+          - Mirrors EasyPyChart's chart.plot("SMA 50").update(new_values)
+      [ ] Update add_indicator() to read metadata generically:
+          ps = coord_engine.get_pane_price_scale(ind.pane)
+          if ind.fixed_range:
+              ps.fixed_range = True
+              coord_engine.set_pane_price_scale(ind.pane, *ind.fixed_range)
+          if ind.zero_based:
+              p_min = 0.0  # in _update_price_scale
+          if ind.symmetric_range:
+              max_abs = max(abs(p_min), abs(p_max))  # in _update_price_scale
+      [ ] Verify custom indicators work without any widget changes:
+          [ ] Custom indicator with pane="my_pane", fixed_range=(0,1)
+          [ ] Custom indicator using create_series() instead of Indicator class
+          [ ] Custom indicator with zero_based=True in a new pane
+
+================================================================================
+END OF ANALYSIS & IMPLEMENTATION ROADMAP
+================================================================================
