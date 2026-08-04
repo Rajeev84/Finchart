@@ -31,7 +31,7 @@ class CrosshairStyle:
     """Styling properties for crosshair rendering."""
     line_color: Color = field(default_factory=lambda: Color(149, 152, 161))
     line_width: float = 1.0
-    line_dash: Tuple[int, ...] = (4, 4)  # Dashed line for TradingView-style appearance
+    line_dash: Tuple[int, ...] = ()  # Empty tuple for solid lines (smoother animation)
     badge_bg: Color = field(default_factory=lambda: Color(54, 58, 69))
     badge_fg: Color = field(default_factory=lambda: Color(255, 255, 255))
     badge_font: Tuple[str, int] = ("Segoe UI", 9)
@@ -161,10 +161,12 @@ class CrosshairRenderer:
         axis_y = vp.bottom - self._style.time_axis_height
 
         # 1. Bar Background Highlight
-        # Use fixed minimal width to prevent highlight from growing with zoom
-        # (user-reported: "crosshair vertical line increases in width when chart zooming")
-        highlight_width = self._style.line_width * 2  # e.g., 2px fixed
-        half_w = highlight_width / 2.0
+        # Cap the width so the highlight band doesn't grow unboundedly when
+        # zooming in (user-reported: "crosshair vertical line increases in
+        # width when chart zooming").
+        raw_bar_w = self._coord.get_bar_width()
+        bar_w = min(raw_bar_w, self._style.max_highlight_width)
+        half_w = bar_w / 2.0
         commands.append(DrawCommand(
             layer=Layer.CROSSHAIR,
             tag="bar_highlight",

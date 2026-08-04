@@ -213,17 +213,10 @@ class RenderingPipeline:
             # Hollow candles / MACD bars happen when a crosshair stipple bleeds
             # onto a recycled rectangle fill.
             if cmd.item_type in ("line", "rectangle", "oval", "polygon"):
-                # For solid fills, we need to delete the stipple option entirely
-                # For stippled fills, keep the stipple option
-                if "stipple" in options and options["stipple"]:
-                    # Keep the stipple pattern
-                    pass
-                else:
-                    # Remove stipple option for solid fill
-                    options.pop("stipple", None)
+                if "stipple" not in options:
+                    options["stipple"] = ""
                 if "dash" not in options:
                     options["dash"] = ()
-                
                 self._canvas.coords(item_id, *cmd.coords)
                 self._canvas.itemconfig(item_id, **options)
             elif cmd.item_type == "text":
