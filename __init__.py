@@ -16,7 +16,7 @@ Usage:
 """
 from __future__ import annotations
 
-__version__ = "1.0.4"
+__version__ = "0.1.0"
 __author__ = "FinChart Engineering"
 
 # Public API surface
@@ -26,8 +26,6 @@ from .core.events import EventBus, EventType, Event
 from .core.store import DataStore
 from .coordinates.engine import CoordinateEngine, TimeScale, PriceScale
 from .layout.engine import LayoutEngine
-from .layout.manager import LayoutManager
-from .session.manager import SessionManager
 from .rendering.pipeline import RenderingPipeline, DrawCommand, Layer
 from .themes.style import Theme, DarkTheme, LightTheme
 from .indicators import (
@@ -57,9 +55,6 @@ __all__ = [
     "PriceScale",
     # Layout
     "LayoutEngine",
-    "LayoutManager",
-    # Session
-    "SessionManager",
     # Rendering
     "RenderingPipeline",
     "DrawCommand",

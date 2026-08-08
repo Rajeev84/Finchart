@@ -84,8 +84,7 @@ class InteractionController:
                     target_pane = pane_name
                     break
         
-        target_vp = chart_vp if target_pane == "candlestick" else self._coord.get_pane_viewport(target_pane)
-        price = self._coord.y_to_price(y, target_vp, target_pane)
+        price = self._coord.y_to_price(y, chart_vp, target_pane)
 
         ctrl = (event.state & 0x4) != 0
 
@@ -99,7 +98,6 @@ class InteractionController:
                         id=uuid.uuid4().hex,
                         tool_type="hline",
                         points=[(None, price)],
-                        anchor_timestamps=[None],
                         color=Color(255, 165, 0),
                         width=2.0,
                         style="solid",
@@ -113,7 +111,6 @@ class InteractionController:
                         id=uuid.uuid4().hex,
                         tool_type="vline",
                         points=[(index, None)],
-                        anchor_timestamps=[self._widget._data_store.get_timestamp_from_index(index)],
                         color=Color(255, 165, 0),
                         width=2.0,
                         style="solid",
@@ -202,10 +199,6 @@ class InteractionController:
                     id=uuid.uuid4().hex,
                     tool_type=ctx.tool_type,
                     points=points,
-                    anchor_timestamps=[
-                        self._widget._data_store.get_timestamp_from_index(points[i][0]) if points[i][0] is not None else None
-                        for i in range(len(points))
-                    ],
                     color=Color(255, 165, 0),
                     fill=Color(255, 165, 0, 0.3) if ctx.tool_type == "rectangle" else None,
                     width=2.0,
@@ -249,13 +242,13 @@ class InteractionController:
                 tool_vp = chart_vp if tool_pane == "candlestick" else self._coord.get_pane_viewport(tool_pane)
                 tool_price = self._coord.y_to_price(y, tool_vp, tool_pane)
                 
-                handles = tool.get_handles(self._coord, tool_vp)
+                handles = tool.get_handles(self._coord, chart_vp)
                 for hx, hy, hid in handles:
                     if is_point_near_handle(x, y, hx, hy, size=8):
                         snapped_index = round(index)  # Round to nearest bar for snapping
                         self._widget._selection_manager.start_drag("endpoint", hid, x, y, snapped_index, tool_price, tool_pane)
                         return
-                if tool.hit_test(x, y, self._coord, tool_vp):
+                if tool.hit_test(x, y, self._coord, chart_vp):
                     self._widget._selection_manager.start_drag("whole", None, x, y, index, tool_price, tool_pane)
                     return
 
@@ -283,13 +276,13 @@ class InteractionController:
                     tool_vp = chart_vp if tool_pane == "candlestick" else self._coord.get_pane_viewport(tool_pane)
                     tool_price = self._coord.y_to_price(y, tool_vp, tool_pane)
                     
-                    handles = clicked_tool.get_handles(self._coord, tool_vp)
+                    handles = clicked_tool.get_handles(self._coord, chart_vp)
                     for hx, hy, hid in handles:
                         if is_point_near_handle(x, y, hx, hy, size=8):
                             snapped_index = round(index)  # Round to nearest bar for snapping
                             self._widget._selection_manager.start_drag("endpoint", hid, x, y, snapped_index, tool_price, tool_pane)
                             return
-                    if clicked_tool.hit_test(x, y, self._coord, tool_vp):
+                    if clicked_tool.hit_test(x, y, self._coord, chart_vp):
                         self._widget._selection_manager.start_drag("whole", None, x, y, index, tool_price, tool_pane)
                         return
                 return
@@ -321,8 +314,7 @@ class InteractionController:
                     target_pane = pane_name
                     break
         
-        target_vp = chart_vp if target_pane == "candlestick" else self._coord.get_pane_viewport(target_pane)
-        price = self._coord.y_to_price(y, target_vp, target_pane)
+        price = self._coord.y_to_price(y, chart_vp, target_pane)
 
         # Drawing tool drag mode
         if self._widget and self._widget._selection_manager.drag_mode:
@@ -333,34 +325,18 @@ class InteractionController:
             
             delta = self._widget._selection_manager.update_drag(x, y, index, drag_price)
             if delta["mode"] == "endpoint":
-                # Endpoint drag updates the semantic timestamp as well as the
-                # runtime index/price geometry.
+                # Endpoint drag affects only the primary selected shape
                 tool = self._widget._drawing_tools.get(self._widget._selection_manager.selected_id)
                 if tool:
                     tool.move_endpoint(delta["handle"], delta["new_index"], delta["new_price"])
-                    handle_index = 0 if delta["handle"] in ("p1", "mid") else 1
-                    anchors = list(tool.state.anchor_timestamps)
-                    while len(anchors) < len(tool.state.points):
-                        anchors.append(None)
-                    if handle_index < len(tool.state.points):
-                        idx = tool.state.points[handle_index][0]
-                        if idx is not None:
-                            anchors[handle_index] = self._widget._data_store.get_timestamp_from_index(idx)
-                    tool.state.anchor_timestamps = anchors[:len(tool.state.points)]
             elif delta["mode"] == "whole":
-                # Whole-shape drag changes time anchors for every x-bearing
-                # point, preserving the drawing's semantic position.
+                # Whole-shape drag affects all selected shapes
+                d_index = delta.get("d_index", 0.0)
+                d_price = delta.get("d_price", 0.0)
                 for sid in self._widget._selection_manager.selected_ids:
                     tool = self._widget._drawing_tools.get(sid)
                     if tool:
-                        tool.move_whole(delta.get("d_index", 0.0), delta.get("d_price", 0.0))
-                        anchors = list(tool.state.anchor_timestamps)
-                        while len(anchors) < len(tool.state.points):
-                            anchors.append(None)
-                        for i, (idx, _price) in enumerate(tool.state.points):
-                            if idx is not None:
-                                anchors[i] = self._widget._data_store.get_timestamp_from_index(idx)
-                        tool.state.anchor_timestamps = anchors[:len(tool.state.points)]
+                        tool.move_whole(d_index, d_price)
             self._widget._pipeline.force_full_redraw()
             self._widget._request_render()
             self._event_bus.emit_new(EventType.MOUSE_MOVE, self, x=event.x, y=event.y, dragging=True)

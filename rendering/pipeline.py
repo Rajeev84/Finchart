@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Tuple, Any, Set
 from dataclasses import dataclass, field
 from enum import Enum, auto
 import tkinter as tk
-import logging
 
 from ..core.events import EventBus, EventType
 from .pool import CanvasItemPool
@@ -74,7 +73,6 @@ class RenderingPipeline:
 
         self._needs_full_redraw = True
         self._pending_layers: Set[Layer] = set()
-        self._logger = logging.getLogger(__name__)
         self._render_scheduled = False
 
     @property
@@ -94,9 +92,7 @@ class RenderingPipeline:
             self._render_scheduled = True
             try:
                 self._canvas.after_idle(self._render)
-            except tk.TclError:
-                # This occurs during widget teardown; execute synchronously so
-                # the pipeline does not leave stale scheduled state.
+            except Exception:
                 self._render()
 
     def schedule_layer(self, layer: Layer) -> None:
@@ -200,12 +196,11 @@ class RenderingPipeline:
                     self._canvas.tag_lower(tag)
                 else:
                     self._canvas.tag_raise(tag)
-            except tk.TclError:
-                self._logger.debug("Unable to reorder canvas layer %s", tag, exc_info=True)
+            except Exception:
+                pass
 
     def _execute_command(self, cmd: DrawCommand) -> Optional[int]:
         """Configure a canvas item acquired from item pool using command options."""
-        item_id = None
         try:
             item_id = self._item_pool.acquire(cmd.item_type)
             layer_tag = self._layer_manager.get_tag(cmd.layer)
@@ -218,10 +213,17 @@ class RenderingPipeline:
             # Hollow candles / MACD bars happen when a crosshair stipple bleeds
             # onto a recycled rectangle fill.
             if cmd.item_type in ("line", "rectangle", "oval", "polygon"):
-                # Canvas items are pooled, so options from the previous owner
-                # must be explicitly reset before applying the new command.
-                options.setdefault("stipple", "")
-                options.setdefault("dash", ())
+                # For solid fills, we need to delete the stipple option entirely
+                # For stippled fills, keep the stipple option
+                if "stipple" in options and options["stipple"]:
+                    # Keep the stipple pattern
+                    pass
+                else:
+                    # Remove stipple option for solid fill
+                    options.pop("stipple", None)
+                if "dash" not in options:
+                    options["dash"] = ()
+                
                 self._canvas.coords(item_id, *cmd.coords)
                 self._canvas.itemconfig(item_id, **options)
             elif cmd.item_type == "text":
@@ -230,11 +232,5 @@ class RenderingPipeline:
                 self._canvas.itemconfig(item_id, **options)
 
             return item_id
-        except (tk.TclError, ValueError, TypeError) as exc:
-            self._logger.error("Failed to execute draw command %s: %s", cmd.tag, exc, exc_info=True)
-            if item_id is not None:
-                try:
-                    self._item_pool.release(item_id)
-                except tk.TclError:
-                    self._logger.debug("Unable to release failed draw item", exc_info=True)
+        except Exception:
             return None

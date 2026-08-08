@@ -36,15 +36,7 @@ class LayoutEngine:
 
     def add_pane(self, name: str, weight: float = 1.0, overlay_on: Optional[str] = None) -> SubplotPane:
         """Add or update a subplot pane."""
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("Pane name must be a non-empty string")
-        if weight <= 0:
-            raise ValueError("Pane weight must be greater than zero")
-        if overlay_on == name:
-            raise ValueError("A pane cannot overlay itself")
-        if overlay_on is not None and overlay_on not in self._panes and overlay_on != "candlestick":
-            raise ValueError(f"Unknown overlay target pane: {overlay_on}")
-        pane = SubplotPane(name=name, weight=float(weight), overlay_on=overlay_on)
+        pane = SubplotPane(name=name, weight=weight, overlay_on=overlay_on)
         self._panes[name] = pane
         return pane
 
@@ -73,7 +65,7 @@ class LayoutEngine:
         # Subtract axis margins from total height for chart area
         from ..rendering.grid import GridStyle
         axis_height = GridStyle().time_axis_height
-        chart_area_h = max(0.0, total_h - axis_height)  # Reserve space for time axis at bottom
+        chart_area_h = total_h - axis_height  # Reserve space for time axis at bottom
 
         result: Dict[str, Viewport] = {}
 

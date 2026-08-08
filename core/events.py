@@ -6,9 +6,8 @@ to eliminate memory leaks when components or listeners are destroyed.
 from __future__ import annotations
 
 import weakref
-import logging
 import inspect
-from typing import Callable, Dict, List, Any, Optional, Tuple
+from typing import Callable, Dict, List, Any, Optional
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -57,7 +56,6 @@ class EventBus:
         self._counter = 0
         self._emitting = False
         self._queue: List[Event] = []
-        self._logger = logging.getLogger(__name__)
 
     def _make_weak_ref(self, callback: Callable[[Event], None]) -> Any:
         """Create appropriate weak reference for bound method or function."""
@@ -117,9 +115,7 @@ class EventBus:
                     try:
                         cb(event)
                     except Exception:
-                        self._logger.exception(
-                            "Event subscriber failed for %s", event.type.name
-                        )
+                        pass
             self._subscribers[event.type] = alive_refs
         finally:
             self._emitting = False

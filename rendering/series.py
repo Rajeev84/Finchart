@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 from dataclasses import dataclass, field
+import tkinter as tk
 
 from ..core.types import OHLCV, Color, ChartType, Viewport
 from ..coordinates.engine import CoordinateEngine
@@ -71,15 +72,9 @@ class SeriesRenderer:
             # Render only every Nth bar
             if self._chart_type == ChartType.CANDLESTICK:
                 self._render_candlesticks_fast(start_idx, end_idx, viewport, step)
-            elif self._chart_type == ChartType.BASELINE:
-                self._render_baseline(start_idx, end_idx, viewport, step=step)
-            elif self._chart_type == ChartType.STEP:
-                self._render_step(start_idx, end_idx, viewport, step=step)
-            elif self._chart_type in (ChartType.LINE, ChartType.AREA, ChartType.HISTOGRAM):
-                self._render_with_step(start_idx, end_idx, viewport, step)
             else:
-                # OHLC and Heikin-Ashi retain their bar semantics when zoomed out.
-                self._render_ohlc(start_idx, end_idx, viewport, step=step) if self._chart_type == ChartType.OHLC else self._render_heikin_ashi(start_idx, end_idx, viewport, step=step)
+                # For other chart types, just use normal rendering with step
+                self._render_with_step(start_idx, end_idx, viewport, step)
         else:
             start_idx = max(0, vr.start_index - 1)
             end_idx = min(len(self._data), vr.end_index + 1)
@@ -91,14 +86,6 @@ class SeriesRenderer:
                 self._render_area(start_idx, end_idx, viewport)
             elif self._chart_type == ChartType.HISTOGRAM:
                 self._render_histogram(start_idx, end_idx, viewport)
-            elif self._chart_type == ChartType.OHLC:
-                self._render_ohlc(start_idx, end_idx, viewport)
-            elif self._chart_type == ChartType.BASELINE:
-                self._render_baseline(start_idx, end_idx, viewport)
-            elif self._chart_type == ChartType.STEP:
-                self._render_step(start_idx, end_idx, viewport)
-            elif self._chart_type == ChartType.HEIKIN_ASHI:
-                self._render_heikin_ashi(start_idx, end_idx, viewport)
 
     def _render_candlesticks_fast(self, start_idx: int, end_idx: int, viewport: Optional[Viewport], step: int) -> None:
         """Render candlesticks with aggressive downsampling for performance."""
@@ -276,91 +263,6 @@ class SeriesRenderer:
                 z_index=1
             ))
             self._pipeline.schedule_layer(Layer.SERIES)
-
-    def _render_ohlc(self, start_idx: int, end_idx: int, viewport: Optional[Viewport], step: int = 1) -> None:
-        vp = viewport or self._coord.viewport
-        commands = []
-        half_w = max(2.0, self._coord.get_bar_width() * 0.35)
-        for i in range(start_idx, end_idx, max(1, step)):
-            bar = self._data[i]
-            x = self._coord.index_to_x(i)
-            if x + half_w < vp.left or x - half_w > vp.right:
-                continue
-            color = self._style.bullish_color if bar.close >= bar.open else self._style.bearish_color
-            commands.extend([
-                DrawCommand(Layer.SERIES, f"ohlc_v_{i}", "line",
-                            (x, self._coord.price_to_y(bar.high, vp), x, self._coord.price_to_y(bar.low, vp)),
-                            {"fill": color.to_hex(), "width": 1.0}, i),
-                DrawCommand(Layer.SERIES, f"ohlc_o_{i}", "line",
-                            (x - half_w, self._coord.price_to_y(bar.open, vp), x, self._coord.price_to_y(bar.open, vp)),
-                            {"fill": color.to_hex(), "width": 1.0}, i),
-                DrawCommand(Layer.SERIES, f"ohlc_c_{i}", "line",
-                            (x, self._coord.price_to_y(bar.close, vp), x + half_w, self._coord.price_to_y(bar.close, vp)),
-                            {"fill": color.to_hex(), "width": 1.0}, i),
-            ])
-        self._pipeline.add_commands(commands)
-        self._pipeline.schedule_layer(Layer.SERIES)
-
-    def _render_baseline(self, start_idx: int, end_idx: int, viewport: Optional[Viewport], step: int = 1) -> None:
-        vp = viewport or self._coord.viewport
-        baseline = self._data[0].close if self._data else 0.0
-        points = []
-        for i in range(start_idx, end_idx, max(1, step)):
-            x = self._coord.index_to_x(i)
-            y = self._coord.price_to_y(self._data[i].close, vp)
-            points.extend([x, y])
-        if len(points) >= 4:
-            self._pipeline.add_command(DrawCommand(Layer.SERIES, "baseline_series", "line", tuple(points), {"fill": self._style.line_color.to_hex(), "width": self._style.line_width}, 0))
-            y0 = self._coord.price_to_y(baseline, vp)
-            self._pipeline.add_command(DrawCommand(Layer.SERIES, "baseline_level", "line", (vp.left, y0, vp.right, y0), {"fill": self._style.bearish_color.to_hex(), "width": 1.0, "dash": (4, 4)}, -1))
-            self._pipeline.schedule_layer(Layer.SERIES)
-
-    def _render_step(self, start_idx: int, end_idx: int, viewport: Optional[Viewport], step: int = 1) -> None:
-        vp = viewport or self._coord.viewport
-        indices = list(range(start_idx, end_idx, max(1, step)))
-        points = []
-        for pos, i in enumerate(indices):
-            x = self._coord.index_to_x(i)
-            y = self._coord.price_to_y(self._data[i].close, vp)
-            if pos == 0:
-                points.extend([x, y])
-            else:
-                prev_x = self._coord.index_to_x(indices[pos - 1])
-                points.extend([x, self._coord.price_to_y(self._data[indices[pos - 1]].close, vp), x, y])
-        if len(points) >= 4:
-            self._pipeline.add_command(DrawCommand(Layer.SERIES, "step_series", "line", tuple(points), {"fill": self._style.line_color.to_hex(), "width": self._style.line_width}, 0))
-            self._pipeline.schedule_layer(Layer.SERIES)
-
-    def _render_heikin_ashi(self, start_idx: int, end_idx: int, viewport: Optional[Viewport], step: int = 1) -> None:
-        vp = viewport or self._coord.viewport
-        commands = []
-        ha_open = None
-        prev_ha_close = None
-        half_w = self._coord.get_bar_width() / 2.0
-        for i, bar in enumerate(self._data[:end_idx]):
-            ha_close = (bar.open + bar.high + bar.low + bar.close) / 4.0
-            if i == 0:
-                ha_open = (bar.open + bar.close) / 2.0
-            else:
-                ha_open = (ha_open + prev_ha_close) / 2.0
-            ha_high = max(bar.high, ha_open, ha_close)
-            ha_low = min(bar.low, ha_open, ha_close)
-            prev_ha_close = ha_close
-            if i < start_idx or ((i - start_idx) % max(1, step)) != 0:
-                continue
-            x = self._coord.index_to_x(i)
-            if x + half_w < vp.left or x - half_w > vp.right:
-                continue
-            y_high = self._coord.price_to_y(ha_high, vp)
-            y_low = self._coord.price_to_y(ha_low, vp)
-            y_open = self._coord.price_to_y(ha_open, vp)
-            y_close = self._coord.price_to_y(ha_close, vp)
-            top, bottom = min(y_open, y_close), max(y_open, y_close)
-            color = self._style.bullish_color if ha_close >= ha_open else self._style.bearish_color
-            commands.append(DrawCommand(Layer.SERIES, f"ha_wick_{i}", "line", (x, y_high, x, y_low), {"fill": color.to_hex(), "width": self._coord.get_wick_width()}, 0))
-            commands.append(DrawCommand(Layer.SERIES, f"ha_body_{i}", "rectangle", (x-half_w, top, x+half_w, max(top+1.0, bottom)), {"fill": color.to_hex(), "outline": color.to_hex(), "width": 1}, i))
-        self._pipeline.add_commands(commands)
-        self._pipeline.schedule_layer(Layer.SERIES)
 
     def _render_histogram(self, start_idx: int, end_idx: int, viewport: Optional[Viewport]) -> None:
         """Render volume-style histogram bars."""

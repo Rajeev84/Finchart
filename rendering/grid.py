@@ -417,5 +417,5 @@ class GridRenderer:
             if bar_spacing >= 5.0:
                 return dt.strftime("%H:%M")
             return dt.strftime("%d-%b")
-        except (ValueError, OverflowError, OSError):
+        except Exception:
             return str(int(ts))

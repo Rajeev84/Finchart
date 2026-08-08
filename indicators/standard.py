@@ -15,11 +15,7 @@ class SMA(Indicator):
     """Simple Moving Average (SMA) Indicator."""
 
     def __init__(self, period: int = 20, color: str = "#2196F3", width: float = 1.5) -> None:
-        if not isinstance(period, int) or period < 1:
-            raise ValueError("SMA period must be a positive integer")
-        if width <= 0:
-            raise ValueError("SMA width must be positive")
-        super().__init__("SMA", {"period": period, "color": color, "width": width})
+        super().__init__("SMA", {"period": period, "color": color})
         self.period = period
         self.color = Color.from_hex(color)
         self.width = width
@@ -75,11 +71,7 @@ class EMA(Indicator):
     """Exponential Moving Average (EMA) Indicator."""
 
     def __init__(self, period: int = 9, color: str = "#FF9800", width: float = 1.5) -> None:
-        if not isinstance(period, int) or period < 1:
-            raise ValueError("EMA period must be a positive integer")
-        if width <= 0:
-            raise ValueError("EMA width must be positive")
-        super().__init__("EMA", {"period": period, "color": color, "width": width})
+        super().__init__("EMA", {"period": period, "color": color})
         self.period = period
         self.color = Color.from_hex(color)
         self.width = width
@@ -145,11 +137,7 @@ class RSI(Indicator):
     """Relative Strength Index (RSI) Indicator."""
 
     def __init__(self, period: int = 14, color: str = "#E91E63", width: float = 1.5) -> None:
-        if not isinstance(period, int) or period < 1:
-            raise ValueError("RSI period must be a positive integer")
-        if width <= 0:
-            raise ValueError("RSI width must be positive")
-        super().__init__("RSI", {"period": period, "color": color, "width": width}, pane="rsi")
+        super().__init__("RSI", {"period": period, "color": color}, pane="rsi")
         self.period = period
         self.color = Color.from_hex(color)
         self.width = width
@@ -245,13 +233,7 @@ class MACD(Indicator):
         color_hist_bear: str = "#F23645",
         width: float = 1.5,
     ) -> None:
-        if not all(isinstance(v, int) and v >= 1 for v in (fast, slow, signal)):
-            raise ValueError("MACD periods must be positive integers")
-        if slow <= fast:
-            raise ValueError("MACD slow period must be greater than fast period")
-        if width <= 0:
-            raise ValueError("MACD width must be positive")
-        super().__init__("MACD", {"fast": fast, "slow": slow, "signal": signal, "color_macd": color_macd, "color_signal": color_signal, "color_hist_bull": color_hist_bull, "color_hist_bear": color_hist_bear, "width": width}, pane="macd")
+        super().__init__("MACD", {"fast": fast, "slow": slow, "signal": signal}, pane="macd")
         self.fast = fast
         self.slow = slow
         self.signal_period = signal
@@ -406,11 +388,7 @@ class Volume(Indicator):
         color_ma: str = "#2196F3",
         width: float = 1.5,
     ) -> None:
-        if not isinstance(ma_period, int) or ma_period < 1:
-            raise ValueError("Volume MA period must be a positive integer")
-        if width <= 0:
-            raise ValueError("Volume width must be positive")
-        super().__init__("Volume", {"ma_period": ma_period, "color_up": color_up, "color_down": color_down, "color_ma": color_ma, "width": width}, pane="volume")
+        super().__init__("Volume", {"ma_period": ma_period}, pane="volume")
         self.ma_period = ma_period
         self.color_up = Color.from_hex(color_up)
         self.color_down = Color.from_hex(color_down)
@@ -498,13 +476,7 @@ class BollingerBands(Indicator):
         color_lower: str = "#FF9800",
         width: float = 1.0,
     ) -> None:
-        if not isinstance(period, int) or period < 1:
-            raise ValueError("Bollinger Bands period must be a positive integer")
-        if std_dev < 0:
-            raise ValueError("Bollinger Bands standard deviation must be non-negative")
-        if width <= 0:
-            raise ValueError("Bollinger Bands width must be positive")
-        super().__init__("BollingerBands", {"period": period, "std_dev": std_dev, "color_middle": color_middle, "color_upper": color_upper, "color_lower": color_lower, "width": width})
+        super().__init__("BollingerBands", {"period": period, "std_dev": std_dev})
         self.period = period
         self.std_dev = std_dev
         self.color_middle = Color.from_hex(color_middle)

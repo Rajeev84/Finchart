@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import List, Tuple, Optional, Any, Dict, Union
 import bisect
-import math
 from datetime import datetime
 
 from .types import OHLCV
@@ -40,19 +39,13 @@ class DataStore:
     def set_data(self, data: Union[List[OHLCV], Any]) -> None:
         """Set or replace total bar dataset. Automatically normalizes DataFrame if passed."""
         normalized = self._normalize_input(data)
-        for bar in normalized:
-            self._validate_bar(bar)
-        if any(bar.timestamp < normalized[i - 1].timestamp for i, bar in enumerate(normalized) if i > 0):
-            raise ValueError("Data timestamps must be sorted ascending")
         self._data = normalized
         self._timestamps = [b.timestamp for b in self._data]
         self._event_bus.emit_new(EventType.DATA_CHANGED, self, count=len(self._data))
 
     def append(self, bar: Union[OHLCV, dict]) -> None:
-        """Append a single new bar, preserving the sorted-timestamp invariant."""
+        """Append a single new bar to the data store."""
         ohlcv_bar = self._normalize_single_bar(bar)
-        if self._timestamps and ohlcv_bar.timestamp < self._timestamps[-1]:
-            raise ValueError("Appended bar timestamp must be >= the last stored timestamp")
         self._data.append(ohlcv_bar)
         self._timestamps.append(ohlcv_bar.timestamp)
         self._event_bus.emit_new(EventType.DATA_CHANGED, self, count=len(self._data), action="append")
@@ -64,8 +57,6 @@ class DataStore:
             return
 
         ohlcv_bar = self._normalize_single_bar(bar)
-        if ohlcv_bar.timestamp != self._timestamps[-1]:
-            raise ValueError("Updated bar timestamp must equal the last stored timestamp; use append() for a new bar")
         self._data[-1] = ohlcv_bar
         self._timestamps[-1] = ohlcv_bar.timestamp
         self._event_bus.emit_new(EventType.DATA_CHANGED, self, count=len(self._data), action="update_last")
@@ -98,74 +89,61 @@ class DataStore:
         return (min_p, max_p)
 
     def get_index_from_timestamp(self, timestamp: float) -> int:
-        """Return the bar containing/at-or-before ``timestamp``.
-
-        For cross-timeframe drawings this is intentionally a floor lookup: an
-        intraday anchor such as 09:30 resolves to the daily candle containing
-        that instant instead of jumping to a later candle.
-        """
+        """Find bar index corresponding to a Unix timestamp using binary search."""
         if not self._timestamps:
             return 0
-        idx = bisect.bisect_right(self._timestamps, float(timestamp)) - 1
-        return max(0, min(len(self._timestamps) - 1, idx))
+        idx = bisect.bisect_left(self._timestamps, timestamp)
+        if idx >= len(self._timestamps):
+            return len(self._timestamps) - 1
+        return idx
 
     def get_timestamp_from_index(self, index: float) -> float:
-        """Convert a float bar index to a linearly interpolated timestamp."""
+        """Convert a float index to interpolated or exact Unix timestamp."""
         if not self._timestamps:
             return 0.0
-        if len(self._timestamps) == 1:
-            return self._timestamps[0]
-        i = max(0.0, min(float(len(self._timestamps) - 1), float(index)))
-        lo = int(math.floor(i))
-        hi = min(len(self._timestamps) - 1, lo + 1)
-        frac = i - lo
-        return self._timestamps[lo] + (self._timestamps[hi] - self._timestamps[lo]) * frac
+
+        int_idx = int(round(index))
+        clamped_idx = max(0, min(len(self._timestamps) - 1, int_idx))
+        return self._timestamps[clamped_idx]
 
     # --- Internal Helpers ---
     def _normalize_input(self, raw_input: Any) -> List[OHLCV]:
-        """Convert a DataFrame or sequence of bars into validated OHLCV values."""
-        if raw_input is None:
+        """Convert pandas DataFrame, list of dicts, or list of OHLCV to List[OHLCV]."""
+        if not raw_input:
             return []
 
+        # Check if pandas DataFrame
         if hasattr(raw_input, "columns") and hasattr(raw_input, "iloc"):
             return self._from_dataframe(raw_input)
 
-        if isinstance(raw_input, (list, tuple)):
-            return [self._normalize_single_bar(item) for item in raw_input]
+        # Check if list of dicts or list of OHLCV
+        if isinstance(raw_input, list):
+            result = []
+            for item in raw_input:
+                result.append(self._normalize_single_bar(item))
+            return result
 
-        raise TypeError("data must be a pandas DataFrame or a sequence of OHLCV/dict bars")
+        return []
 
     def _normalize_single_bar(self, item: Any) -> OHLCV:
         """Normalize dict or OHLCV into an OHLCV bar."""
         if isinstance(item, OHLCV):
-            self._validate_bar(item)
             return item
 
         if isinstance(item, dict):
-            ts = item.get("timestamp", item.get("time", item.get("date")))
-            if ts is None:
-                raise ValueError("OHLCV bar is missing timestamp/time/date")
-            ts = self._parse_datetime(ts)
+            # Parse timestamp
+            ts = item.get("timestamp", item.get("time", item.get("date", 0)))
+            if isinstance(ts, (datetime, str)):
+                ts = self._parse_datetime(ts)
 
-            required = {
-                "open": ("open", "Open"),
-                "high": ("high", "High"),
-                "low": ("low", "Low"),
-                "close": ("close", "Close"),
-            }
-            values = {}
-            for canonical, aliases in required.items():
-                value = next((item[k] for k in aliases if k in item), None)
-                if value is None:
-                    raise ValueError(f"OHLCV bar is missing {canonical}")
-                values[canonical] = float(value)
-            volume = item.get("volume", item.get("Volume", 0.0))
-            bar = OHLCV(timestamp=ts, open=values["open"], high=values["high"],
-                        low=values["low"], close=values["close"], volume=float(volume))
-            self._validate_bar(bar)
-            return bar
+            op = float(item.get("open", item.get("Open", 0.0)))
+            hi = float(item.get("high", item.get("High", 0.0)))
+            lo = float(item.get("low", item.get("Low", 0.0)))
+            cl = float(item.get("close", item.get("Close", 0.0)))
+            vo = float(item.get("volume", item.get("Volume", 0.0)))
+            return OHLCV(timestamp=float(ts), open=op, high=hi, low=lo, close=cl, volume=vo)
 
-        raise TypeError(f"Unsupported OHLCV bar type: {type(item).__name__}")
+        return OHLCV(timestamp=0.0, open=0.0, high=0.0, low=0.0, close=0.0, volume=0.0)
 
     def _from_dataframe(self, df: Any) -> List[OHLCV]:
         """Convert pandas DataFrame to List[OHLCV]."""
@@ -173,13 +151,12 @@ class DataStore:
         # Find column names flexibly
         cols = {col.lower(): col for col in df.columns}
 
-        time_col = cols.get("datetime", cols.get("timestamp", cols.get("time", cols.get("date", None))))
-        required = {name: cols.get(name) for name in ("open", "high", "low", "close")}
-        missing = [name for name, col in required.items() if col is None]
-        if missing:
-            raise ValueError(f"DataFrame is missing required OHLC columns: {', '.join(missing)}")
-        open_col, high_col, low_col, close_col = (required[name] for name in ("open", "high", "low", "close"))
-        vol_col = cols.get("volume")
+        time_col = cols.get("datetime", cols.get("time", cols.get("date", None)))
+        open_col = cols.get("open", "Open")
+        high_col = cols.get("high", "High")
+        low_col = cols.get("low", "Low")
+        close_col = cols.get("close", "Close")
+        vol_col = cols.get("volume", "Volume")
 
         for idx, row in df.iterrows():
             if time_col and time_col in row:
@@ -189,30 +166,14 @@ class DataStore:
                 # Use row index if integer or timestamp
                 ts = self._parse_datetime(idx)
 
-            op = float(row[open_col])
-            hi = float(row[high_col])
-            lo = float(row[low_col])
-            cl = float(row[close_col])
-            vo = float(row[vol_col]) if vol_col is not None else 0.0
+            op = float(row.get(open_col, 0.0))
+            hi = float(row.get(high_col, 0.0))
+            lo = float(row.get(low_col, 0.0))
+            cl = float(row.get(close_col, 0.0))
+            vo = float(row.get(vol_col, 0.0))
             bars.append(OHLCV(timestamp=float(ts), open=op, high=hi, low=lo, close=cl, volume=vo))
 
-        for bar in bars:
-            self._validate_bar(bar)
-        if any(b.timestamp < bars[i - 1].timestamp for i, b in enumerate(bars) if i > 0):
-            raise ValueError("DataFrame timestamps must be sorted ascending")
         return bars
-
-    @staticmethod
-    def _validate_bar(bar: OHLCV) -> None:
-        values = (bar.timestamp, bar.open, bar.high, bar.low, bar.close, bar.volume)
-        if not all(math.isfinite(float(v)) for v in values):
-            raise ValueError("OHLCV values must be finite numbers")
-        if bar.high < max(bar.open, bar.close) or bar.low > min(bar.open, bar.close):
-            raise ValueError("OHLCV high/low values are inconsistent with open/close")
-        if bar.high < bar.low:
-            raise ValueError("OHLCV high must be >= low")
-        if bar.volume < 0:
-            raise ValueError("OHLCV volume cannot be negative")
 
     def _parse_datetime(self, val: Any) -> float:
         """Parse datetime object, string, or number into unix timestamp seconds."""
@@ -223,8 +184,6 @@ class DataStore:
         try:
             import pandas as pd
             dt = pd.to_datetime(val)
-            if hasattr(dt, "to_pydatetime"):
-                dt = dt.to_pydatetime()
-            return float(dt.timestamp())
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError(f"Invalid datetime value: {val!r}") from exc
+            return dt.timestamp()
+        except Exception:
+            return 0.0

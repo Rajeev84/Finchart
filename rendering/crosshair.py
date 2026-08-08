@@ -318,5 +318,5 @@ class CrosshairRenderer:
         try:
             dt = datetime.fromtimestamp(ts)
             return dt.strftime("%Y-%m-%d %H:%M")
-        except (ValueError, OverflowError, OSError):
+        except Exception:
             return str(int(ts))

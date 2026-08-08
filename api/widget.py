@@ -14,14 +14,13 @@ import tkinter as tk
 from typing import List, Optional, Callable, Dict, Any, Union, Tuple
 import json
 import math
+import os
 
-from ..core.types import OHLCV, Viewport, ChartType
+from ..core.types import OHLCV, Viewport, ChartType, Color
 from ..core.events import EventBus, EventType, Event
 from ..core.store import DataStore
 from ..coordinates.engine import CoordinateEngine
 from ..layout.engine import LayoutEngine
-from ..layout.manager import LayoutManager
-from ..session.manager import SessionManager
 from ..rendering.pipeline import RenderingPipeline, Layer
 from ..rendering.series import SeriesRenderer, SeriesStyle
 from ..rendering.grid import GridRenderer, GridStyle
@@ -68,14 +67,8 @@ class ChartWidget(tk.Frame):
         # Core Subsystems
         self._event_bus = EventBus()
         self._data_store = DataStore(self._event_bus)
-        # Runtime-only market-data cache keyed by (symbol, timeframe).
-        # Session files intentionally contain workspace state, not market data.
-        self._context_data_cache: Dict[Tuple[str, str], Any] = {}
         self._coord_engine = CoordinateEngine(self._event_bus)
-        # LayoutManager owns declarative pane state; keep _layout_engine as a
-        # compatibility alias for existing integrations.
-        self._layout_manager = LayoutManager(LayoutEngine(), self._event_bus)
-        self._layout_engine = self._layout_manager.engine
+        self._layout_engine = LayoutEngine()
 
         # Canvas UI setup
         self.configure(highlightthickness=0)
@@ -154,10 +147,6 @@ class ChartWidget(tk.Frame):
         self._auto_scale = True
         self._right_offset_bars = 5
 
-        # Workspace/session state manager. Market data remains runtime state;
-        # drawings and view state are persisted per symbol/timeframe context.
-        self._session_manager = SessionManager(self)
-
         # Bind Internal Event Handlers
         self._bind_internal_events()
 
@@ -166,43 +155,9 @@ class ChartWidget(tk.Frame):
 
     # ==================== Public API ====================
 
-    @property
-    def layout_manager(self) -> LayoutManager:
-        """Declarative workspace layout manager."""
-        return self._layout_manager
-
-    @property
-    def session_manager(self) -> SessionManager:
-        """Persistent workspace/session manager."""
-        return self._session_manager
-
-    @property
-    def current_context(self) -> Tuple[str, str]:
-        """Return the active (symbol, timeframe) context."""
-        return self._session_manager.current_context
-
-    def set_context(self, symbol: str, timeframe: str, data: Any = None,
-                    clear_data: bool = True) -> None:
-        """Switch symbol/timeframe and reuse already-loaded runtime data."""
-        key = (str(symbol), str(timeframe))
-        if data is None:
-            data = self._context_data_cache.get(key)
-        self._session_manager.set_context(symbol, timeframe, data=data,
-                                          clear_data=clear_data)
-
-    @property
-    def current_context(self) -> Tuple[str, str]:
-        return (self._session_manager.current_symbol, self._session_manager.current_timeframe)
-
-    def cached_contexts(self) -> List[Tuple[str, str]]:
-        """Return loaded runtime symbol/timeframe contexts."""
-        return list(self._context_data_cache)
-
     def set_data(self, data: Union[List[OHLCV], Any]) -> None:
         """Set or replace data bars."""
         self._data_store.set_data(data)
-        if self._data_store.data:
-            self._context_data_cache[self.current_context] = list(self._data_store.data)
         self._series_renderer.set_data(self._data_store.data)
         self._crosshair_renderer.set_data(self._data_store.data)
         self._update_indicators()
@@ -213,7 +168,6 @@ class ChartWidget(tk.Frame):
     def append(self, bar: Union[OHLCV, dict]) -> None:
         """Append a new bar to dataset."""
         self._data_store.append(bar)
-        self._context_data_cache[self.current_context] = list(self._data_store.data)
         self._series_renderer.set_data(self._data_store.data)
         self._crosshair_renderer.set_data(self._data_store.data)
         self._update_indicators()
@@ -224,7 +178,6 @@ class ChartWidget(tk.Frame):
     def update_last(self, bar: Union[OHLCV, dict]) -> None:
         """Update last bar in real-time streaming mode."""
         self._data_store.update_last(bar)
-        self._context_data_cache[self.current_context] = list(self._data_store.data)
         self._series_renderer.set_data(self._data_store.data)
         self._crosshair_renderer.set_data(self._data_store.data)
         self._update_indicators()
@@ -239,13 +192,12 @@ class ChartWidget(tk.Frame):
         else:
             active_pane = pane
         
-        # Layout is declarative and indicator-driven. The manager creates the
-        # required pane and emits LAYOUT_CHANGED before viewport recalculation.
-        self._layout_manager.ensure_pane(active_pane, weight=1.0)
+        # Create subplot pane for non-candlestick indicators if not already present
+        if active_pane != "candlestick" and active_pane not in self._layout_engine.panes:
+            self._layout_engine.add_pane(active_pane, weight=1.0)
+            self._update_viewport()
+        
         self._indicators.append(indicator)
-        self._layout_manager.sync_indicators(self._indicators)
-        self._event_bus.emit_new(EventType.INDICATOR_ADDED, self, indicator=indicator)
-        self._update_viewport()
         if not self._data_store.is_empty:
             indicator.update(self._data_store.data)
         
@@ -269,29 +221,28 @@ class ChartWidget(tk.Frame):
         """Remove an indicator from chart."""
         if indicator in self._indicators:
             self._indicators.remove(indicator)
-            self._layout_manager.sync_indicators(self._indicators)
-            self._update_viewport()
-            self._event_bus.emit_new(EventType.INDICATOR_REMOVED, self, indicator=indicator)
+            # Clean up empty subplot panes
+            pane = indicator.pane if hasattr(indicator, 'pane') else "candlestick"
+            if pane != "candlestick" and pane in self._layout_engine.panes:
+                # Check if any remaining indicators use this pane
+                pane_still_used = any(ind.pane == pane for ind in self._indicators)
+                if not pane_still_used:
+                    self._layout_engine.remove_pane(pane)
+                    self._update_viewport()
             self._pipeline.force_full_redraw()
             self._request_render()
 
     def clear_indicators(self) -> None:
         """Remove all indicators."""
-        removed = list(self._indicators)
         self._indicators.clear()
-        for indicator in removed:
-            self._event_bus.emit_new(EventType.INDICATOR_REMOVED, self, indicator=indicator)
-        self._layout_manager.reset()
+        self._layout_engine.reset()
         self._update_viewport()
         self._pipeline.force_full_redraw()
         self._request_render()
 
     def set_chart_type(self, chart_type: ChartType) -> None:
-        """Change the primary series chart type."""
-        if not isinstance(chart_type, ChartType):
-            raise TypeError("chart_type must be a ChartType value")
+        """Change chart type (Candlestick, Line, Area, Histogram)."""
         self._series_renderer.chart_type = chart_type
-        self._event_bus.emit_new(EventType.CHART_TYPE_CHANGED, self, chart_type=chart_type)
         self._pipeline.force_full_redraw()
         self._request_render()
 
@@ -309,7 +260,6 @@ class ChartWidget(tk.Frame):
         self._crosshair_renderer._style.line_color = theme.crosshair
         self._crosshair_renderer._style.badge_bg = theme.card_bg
         self._crosshair_renderer._style.badge_fg = theme.axis_text
-        self._event_bus.emit_new(EventType.THEME_CHANGED, self, theme=theme)
         self._pipeline.force_full_redraw()
         self._request_render()
 
@@ -393,168 +343,57 @@ class ChartWidget(tk.Frame):
         self._request_render()
 
     # --- Session Persistence ---
-    def add_pane(self, name: str, weight: float = 1.0,
-                 overlay_on: Optional[str] = None) -> None:
-        """Add a declarative subplot pane and recalculate its viewport."""
-        self._layout_manager.add_pane(name, weight=weight, overlay_on=overlay_on)
-        self._update_viewport()
-        self._pipeline.force_full_redraw()
-        self._request_render()
-
-    def remove_pane(self, name: str) -> bool:
-        """Remove a non-primary subplot pane."""
-        removed = self._layout_manager.remove_pane(name)
-        if removed:
-            self._update_viewport()
-            self._pipeline.force_full_redraw()
-            self._request_render()
-        return removed
-
-    def save_layout(self, filepath: str) -> None:
-        """Persist structural layout and indicator definitions without drawings."""
-        import json
-        state = self._session_manager.build_state()
-        layout_state = {
-            "schema_version": state["schema_version"],
-            "layout": state["layout"],
-            "indicators": state["indicators"],
-            "chart": state["chart"],
-        }
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(layout_state, f, indent=2, ensure_ascii=False)
-
-    def load_layout(self, filepath: str) -> None:
-        """Load structural layout and indicator definitions atomically."""
-        with open(filepath, "r", encoding="utf-8") as f:
-            state = json.load(f)
-
-        new_indicators = [
-            self._session_manager._indicator_from_dict(item)
-            for item in state.get("indicators", [])
-        ]
-        chart_name = state.get("chart", {}).get("chart_type")
-        chart_type = ChartType[chart_name] if chart_name else None
-
-        # All validation above occurs before mutating the live workspace.
-        self._layout_manager.restore(state.get("layout", {}))
-        self._indicators = new_indicators
-        self._layout_manager.sync_indicators(self._indicators)
-        if chart_type is not None:
-            self.set_chart_type(chart_type)
-        self._update_viewport()
-        self._update_indicators()
-        self._update_price_scale()
-        self._pipeline.force_full_redraw()
-        self._request_render()
-
     def save_session(self, filepath: str) -> None:
-        """Save the complete logical workspace session to JSON.
-
-        The session contains layout, indicators, per-context drawings,
-        per-context viewport state, chart type and display settings. Market
-        data buffers and Tkinter canvas objects are intentionally excluded.
-        """
-        self._session_manager.save(filepath)
+        """Serialize current drawings and indicators to JSON session file."""
+        state = {
+            "version": "1.0",
+            "drawings": {
+                tag: {
+                    "tool_type": d.tool_type,
+                    "points": d.points,
+                    "color": d.color.to_hex(),
+                    "width": d.width
+                }
+                for tag, d in self._drawings.items()
+            }
+        }
+        with open(filepath, "w") as f:
+            json.dump(state, f, indent=2)
 
     def load_session(self, filepath: str) -> None:
-        """Load a workspace session while preserving externally supplied data."""
-        self._session_manager.load(filepath)
+        """Load serialized session state from JSON file."""
+        if not os.path.exists(filepath):
+            return
+        try:
+            with open(filepath, "r") as f:
+                state = json.load(f)
+            self._drawings = {}
+            self._drawing_tools = {}
+            for tag, d_data in state.get("drawings", {}).items():
+                drawing_state = DrawingState.from_dict(d_data)
+                self._drawings[drawing_state.id] = drawing_state
+                tool = self._create_tool(drawing_state)
+                self._drawing_tools[drawing_state.id] = tool
+            self._request_render()
+        except Exception:
+            pass
 
-    # --- Drawing Tool Public API ---
     # --- Drawing Tool Public API ---
 
     def add_drawing(self, state: DrawingState) -> Any:
-        """Add a finalized drawing shape to the chart.
-
-        Runtime tools always receive a DrawingState. Mapping input is accepted
-        only at this public API boundary for session/JSON compatibility.
-        """
-        if isinstance(state, dict):
-            state = DrawingState.from_dict(state)
-        elif not isinstance(state, DrawingState):
-            raise TypeError(
-                "add_drawing() expects DrawingState or a drawing-state dict, "
-                f"got {type(state).__name__}"
-            )
-
-        self._ensure_drawing_anchors(state)
-        self._resolve_drawing_geometry(state)
+        """Add a finalized drawing shape to the chart."""
         tool = self._create_tool(state)
         self._drawing_tools[state.id] = tool
         self._drawings[state.id] = state
-        self._event_bus.emit_new(EventType.DRAWING_ADDED, self, drawing=state)
         self._pipeline.force_full_redraw()
         self._request_render()
         return tool
-
-    def _ensure_drawing_anchors(self, state: DrawingState) -> None:
-        """Populate missing semantic timestamps from the current data context."""
-        if not self._data_store.data:
-            return
-        points = state.points
-        anchors = list(state.anchor_timestamps)
-        if len(anchors) < len(points):
-            anchors.extend([None] * (len(points) - len(anchors)))
-        for i, (idx, _price) in enumerate(points):
-            if anchors[i] is None and idx is not None:
-                anchors[i] = self._data_store.get_timestamp_from_index(float(idx))
-        state.anchor_timestamps = anchors[:len(points)]
-
-    def _resolve_drawing_geometry(self, state: DrawingState) -> None:
-        """Resolve stable timestamp anchors into indexes for the active timeframe."""
-        if not self._data_store.data or not state.anchor_timestamps:
-            return
-        points = list(state.points)
-        anchors = state.anchor_timestamps
-        if len(anchors) < len(points):
-            anchors = anchors + [None] * (len(points) - len(anchors))
-        for i, ((idx, price), ts) in enumerate(zip(points, anchors)):
-            if ts is not None:
-                points[i] = (float(self._data_store.get_index_from_timestamp(ts)), price)
-        state.points = points
-
-    def _resolve_all_drawing_geometry(self) -> None:
-        """Rebind all drawing geometry after a data/context/timeframe change."""
-        for state in self._drawings.values():
-            self._resolve_drawing_geometry(state)
-
-    def _ensure_drawing_anchors(self, state: DrawingState) -> None:
-        """Populate missing semantic timestamps from the current data context."""
-        if not self._data_store.data:
-            return
-        points = state.points
-        anchors = list(state.anchor_timestamps)
-        if len(anchors) < len(points):
-            anchors.extend([None] * (len(points) - len(anchors)))
-        for i, (idx, _price) in enumerate(points):
-            if anchors[i] is None and idx is not None:
-                anchors[i] = self._data_store.get_timestamp_from_index(float(idx))
-        state.anchor_timestamps = anchors[:len(points)]
-
-    def _resolve_drawing_geometry(self, state: DrawingState) -> None:
-        """Resolve stable timestamp anchors into indexes for the active timeframe."""
-        if not self._data_store.data or not state.anchor_timestamps:
-            return
-        points = list(state.points)
-        anchors = state.anchor_timestamps
-        if len(anchors) < len(points):
-            anchors = anchors + [None] * (len(points) - len(anchors))
-        for i, ((idx, price), ts) in enumerate(zip(points, anchors)):
-            if ts is not None:
-                points[i] = (float(self._data_store.get_index_from_timestamp(ts)), price)
-        state.points = points
-
-    def _resolve_all_drawing_geometry(self) -> None:
-        """Rebind all drawing geometry after a data/context/timeframe change."""
-        for state in self._drawings.values():
-            self._resolve_drawing_geometry(state)
 
     def remove_drawing(self, shape_id: str) -> None:
         """Remove a drawing by ID."""
         if shape_id in self._drawing_tools:
             del self._drawing_tools[shape_id]
             del self._drawings[shape_id]
-            self._event_bus.emit_new(EventType.DRAWING_REMOVED, self, drawing_id=shape_id)
             # Properly deselect via the manager's public API
             if self._selection_manager.is_selected(shape_id):
                 self._selection_manager.select(shape_id, toggle=True, multi=True)
@@ -568,25 +407,6 @@ class ChartWidget(tk.Frame):
         self._selection_manager.unselect()
         self._pipeline.force_full_redraw()
         self._request_render()
-
-    def find_drawings(self, label: Optional[str] = None, tool_type: Optional[str] = None,
-                      pane_name: Optional[str] = None) -> List[DrawingState]:
-        """Find drawings in the active context using stable metadata filters."""
-        result = []
-        needle = label.casefold() if label is not None else None
-        for state in self._drawings.values():
-            if needle is not None and needle not in state.label.casefold():
-                continue
-            if tool_type is not None and state.tool_type != tool_type:
-                continue
-            if pane_name is not None and state.pane_name != pane_name:
-                continue
-            result.append(state)
-        return result
-
-    def find_drawing(self, drawing_id: str) -> Optional[DrawingState]:
-        """Return a drawing by ID, or None when it is absent."""
-        return self._drawings.get(drawing_id)
 
     def delete_selected_drawings(self) -> None:
         """Remove all currently selected drawings."""
@@ -629,10 +449,7 @@ class ChartWidget(tk.Frame):
             "rectangle": Rectangle,
             "longshort": LongShort,
         }
-        cls = mapping.get(state.tool_type)
-        if cls is None:
-            valid = ", ".join(sorted(mapping))
-            raise ValueError(f"Unknown drawing tool type {state.tool_type!r}; expected one of: {valid}")
+        cls = mapping.get(state.tool_type, TrendLine)
         tool = cls(state)
         # For LongShort, ensure position type is set from context if available
         if state.tool_type == "longshort" and self._tool_context and self._tool_context.position_type:
@@ -937,8 +754,6 @@ class ChartWidget(tk.Frame):
         self._pipeline.schedule_layer(Layer.INDICATORS)
 
     def _request_render(self) -> None:
-        self._resolve_all_drawing_geometry()
-        self._resolve_all_drawing_geometry()
         """Execute unified render pass across all renderers."""
         # Drop stale commands so incremental layer passes only see this frame.
         self._pipeline.clear_commands()
@@ -978,8 +793,7 @@ class ChartWidget(tk.Frame):
         if self._tool_context and self._tool_context.preview_tool and self._tool_context.preview_shape:
             preview_tool = self._tool_context.preview_tool
             if preview_tool.state.visible:
-                preview_vp = chart_vp if preview_tool.state.pane_name == "candlestick" else self._coord_engine.get_pane_viewport(preview_tool.state.pane_name)
-                cmds = preview_tool.render_commands(self._coord_engine, preview_vp)
+                cmds = preview_tool.render_commands(self._coord_engine, chart_vp)
                 self._pipeline.add_commands(cmds)
 
         self._pipeline.schedule_layer(Layer.DRAWING)

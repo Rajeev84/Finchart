@@ -6,7 +6,7 @@ Supports time scale panning/zooming around anchor points and price auto/log-scal
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple, List
+from typing import Optional, Tuple, List
 import math
 
 from ..core.types import OHLCV, Viewport, VisibleRange, Point
@@ -90,14 +90,14 @@ class CoordinateEngine:
         if rng <= 0:
             rng = 1.0
 
-        if ps.fixed_range:
-            new_min = float(min_price)
-            new_max = float(max_price)
-        else:
-            top_pad = rng * ps.top_padding
-            bot_pad = rng * ps.bottom_padding
-            new_min = min_price - bot_pad
-            new_max = max_price + top_pad
+        # Apply visual padding so lines don't sit flush against pane edges.
+        # fixed_range panes (e.g. RSI 0-100) use the same padding logic; the
+        # flag's purpose is only to prevent the auto-scaler from overwriting
+        # the range later (see _update_price_scale in widget.py).
+        top_pad = rng * ps.top_padding
+        bot_pad = rng * ps.bottom_padding
+        new_min = min_price - bot_pad
+        new_max = max_price + top_pad
 
         # Check if the values actually changed to prevent infinite feedback loops
         if (abs(ps.min_price - new_min) < 1e-9 and
@@ -106,6 +106,15 @@ class CoordinateEngine:
 
         ps.min_price = new_min
         ps.max_price = new_max
+
+        # Only emit event if requested (not during normal rendering)
+        if emit_event:
+            self._event_bus.emit_new(
+                EventType.SCALE_CHANGED,
+                self,
+                min_price=ps.min_price,
+                max_price=ps.max_price
+            )
 
         # Only emit event if requested (not during normal rendering)
         if emit_event:

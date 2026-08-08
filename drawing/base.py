@@ -25,11 +25,6 @@ class DrawingState:
     # For hline: points = [(None, price)]
     # For vline: points = [(index, None)]
     points: List[Tuple[Optional[float], Optional[float]]] = field(default_factory=list)
-    # Semantic time anchors for x-coordinates.  Runtime ``points`` remain
-    # index/price pairs for rendering; anchors are the stable source of truth
-    # across symbol/timeframe changes.  ``None`` is used where a point has no
-    # time component (for example an hline).
-    anchor_timestamps: List[Optional[float]] = field(default_factory=list)
 
     # Appearance
     color: Color = field(default_factory=lambda: Color(255, 165, 0))
@@ -73,7 +68,6 @@ class DrawingState:
             "tool_type": self.tool_type,
             "label": self.label,
             "points": self.points,
-            "anchor_timestamps": self.anchor_timestamps,
             "color": self.color.to_hex(),
             "width": self.width,
             "style": self.style,
@@ -93,11 +87,7 @@ class DrawingState:
             id=data.get("id", uuid.uuid4().hex),
             tool_type=data.get("tool_type", ""),
             label=data.get("label", ""),
-            points=[tuple(point) for point in data.get("points", [])],
-            anchor_timestamps=[
-                float(ts) if ts is not None else None
-                for ts in data.get("anchor_timestamps", [])
-            ],
+            points=data.get("points", []),
             color=Color.from_hex(data.get("color", "#FFA500")),
             width=data.get("width", 2.0),
             style=data.get("style", "solid"),

@@ -211,7 +211,7 @@ class Color:
             b = int(clean_hex[4:6], 16)
             a = int(clean_hex[6:8], 16) / 255.0
             return cls(r=r, g=g, b=b, a=a)
-        raise ValueError(f"Invalid hex color: {hex_str!r}")
+        return cls(r=0, g=0, b=0, a=alpha)
 
 
 @dataclass(slots=True)
