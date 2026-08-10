@@ -1,0 +1,993 @@
+CHART STATE & SESSION PERSISTENCE ENGINE
+│
+├── 1. Define Chart State Architecture
+│   │
+│   ├── 1.1 Define state ownership boundary
+│   │   ├── ChartState owns persistent chart configuration
+│   │   ├── Interaction Engine owns user interaction mechanics
+│   │   ├── Viewport Controller owns viewport calculations
+│   │   ├── TimeScale owns horizontal coordinate calculations
+│   │   ├── PriceScale owns price coordinate calculations
+│   │   ├── Crosshair Engine owns crosshair mechanics
+│   │   ├── Drawing Engine owns drawing geometry
+│   │   └── Renderer/Compositor owns Canvas rendering
+│   │
+│   ├── 1.2 Define dependency direction
+│   │   ├── USER INPUT
+│   │   ├── INTERACTION ENGINE
+│   │   ├── STATE TRANSITION
+│   │   ├── CHART STATE
+│   │   ├── VIEWPORT / SCALE SYSTEMS
+│   │   ├── COORDINATE SYSTEM
+│   │   ├── INVALIDATION
+│   │   ├── COMPOSITOR
+│   │   ├── RENDERER
+│   │   └── CANVAS
+│   │
+│   ├── 1.3 Prohibit reverse ownership
+│   │   ├── Canvas must not become state source
+│   │   ├── Renderer must not own persistent state
+│   │   ├── ChartState must not calculate coordinates
+│   │   ├── ChartState must not render
+│   │   ├── ChartState must not process mouse events
+│   │   └── ChartState must not load market data
+│   │
+│   └── 1.4 Define ChartState as serializable configuration/state
+│       ├── State must be deterministic
+│       ├── State must be serializable
+│       ├── State must be restorable
+│       └── Runtime-only objects must remain outside persistence
+│
+├── 2. Define State Schema Version
+│   │
+│   ├── 2.1 Define state_version
+│   │   └── Default = 1
+│   │
+│   ├── 2.2 Define schema envelope
+│   │   ├── version
+│   │   ├── chart identity
+│   │   ├── resolution
+│   │   ├── viewport
+│   │   ├── price scale
+│   │   ├── visual state
+│   │   ├── panes
+│   │   ├── series
+│   │   └── drawings
+│   │
+│   ├── 2.3 Define migration boundary
+│   │   ├── Version 1 → current schema
+│   │   ├── Unknown future versions must be rejected safely
+│   │   └── Older versions must pass through StateMigrator
+│   │
+│   └── 2.4 Define schema validation boundary
+│       ├── Validate version
+│       ├── Validate required fields
+│       ├── Validate field types
+│       ├── Validate enum values
+│       ├── Validate numeric ranges
+│       └── Reject malformed snapshots without corrupting current state
+│
+├── 3. Define Chart Identity State
+│   │
+│   ├── 3.1 Define chart_id
+│   │   ├── Required persistent identifier
+│   │   └── Must uniquely identify chart instance
+│   │
+│   ├── 3.2 Define symbol
+│   │   ├── Store selected symbol
+│   │   └── Symbol change is explicit state transition
+│   │
+│   ├── 3.3 Define exchange
+│   │   ├── Store exchange identifier
+│   │   └── Preserve exchange context during restoration
+│   │
+│   ├── 3.4 Define market_session
+│   │   ├── Store applicable session identifier
+│   │   └── Do not implement session calculations in ChartState
+│   │
+│   └── 3.5 Define identity validation
+│       ├── chart_id must be valid
+│       ├── symbol must be valid when required
+│       └── exchange/session values must conform to project conventions
+│
+├── 4. Define Resolution State
+│   │
+│   ├── 4.1 Define timeframe
+│   │   ├── Store selected timeframe
+│   │   └── Do not calculate candle aggregation here
+│   │
+│   ├── 4.2 Validate timeframe
+│   │   ├── Accept project-supported values
+│   │   └── Reject unsupported values safely
+│   │
+│   └── 4.3 Define timeframe transition
+│       ├── Mark resolution_changed
+│       ├── Invalidate old data context
+│       ├── Load/reconcile new series context externally
+│       └── Restore only compatible persistent state
+│
+├── 5. Define Time-Scale Configuration State
+│   │
+│   ├── 5.1 Define bar_spacing
+│   │   ├── Default = 6.0
+│   │   ├── Minimum = 0.5
+│   │   └── Maximum = unlimited / 0
+│   │
+│   ├── 5.2 Define right_offset
+│   │   ├── Default = 0
+│   │   └── Do not use previous rendering-layer recommendation of 5
+│   │       because this state layer follows Lightweight Charts defaults
+│   │
+│   ├── 5.3 Define fix_left_edge
+│   │   └── Default = false
+│   │
+│   ├── 5.4 Define fix_right_edge
+│   │   └── Default = false
+│   │
+│   ├── 5.5 Define ticks_visible
+│   │   └── Default = false
+│   │
+│   ├── 5.6 Define minimum_height
+│   │   └── Default = 0
+│   │
+│   ├── 5.7 Define allow_bold_labels
+│   │   └── Default = true
+│   │
+│   ├── 5.8 Define ignore_whitespace_indices
+│   │   └── Default = false
+│   │
+│   ├── 5.9 Define enable_conflation
+│   │   └── Default = false
+│   │
+│   └── 5.10 Preserve TimeScale ownership
+│       ├── ChartState stores configuration
+│       ├── Existing TimeScale applies configuration
+│       ├── Existing TimeScale performs coordinate calculations
+│       └── ChartState does not implement TimeScale behavior
+│
+├── 6. Define Viewport State
+│   │
+│   ├── 6.1 Define logical_from
+│   │   ├── Type = float
+│   │   └── Preserve fractional values
+│   │
+│   ├── 6.2 Define logical_to
+│   │   ├── Type = float
+│   │   └── Preserve fractional values
+│   │
+│   ├── 6.3 Define viewport validity
+│   │   ├── Accept fractional ranges
+│   │   ├── Reject NaN
+│   │   ├── Reject infinite values
+│   │   └── Allow negative logical positions where existing viewport permits
+│   │
+│   ├── 6.4 Define viewport restoration
+│   │   ├── Restore bar_spacing first
+│   │   ├── Restore logical range
+│   │   ├── Restore right_offset
+│   │   ├── Restore follow_latest
+│   │   └── Pass result through existing viewport controller
+│   │
+│   └── 6.5 Prohibit direct coordinate restoration
+│       ├── Do not store Canvas x coordinates
+│       ├── Do not store Canvas positions
+│       └── Do not bypass viewport controller constraints
+│
+├── 7. Define Follow-Latest State
+│   │
+│   ├── 7.1 Define FOLLOWING_LATEST
+│   │   ├── follow_latest = true
+│   │   └── New data may advance viewport
+│   │
+│   ├── 7.2 Define USER_NAVIGATED
+│   │   ├── follow_latest = false
+│   │   └── New data must not move viewport
+│   │
+│   ├── 7.3 Define transition to USER_NAVIGATED
+│   │   ├── User manually pans away
+│   │   ├── User manually changes viewport position
+│   │   ├── Existing Interaction Engine detects navigation
+│   │   └── State transition sets follow_latest = false
+│   │
+│   ├── 7.4 Define transition to FOLLOWING_LATEST
+│   │   ├── User explicitly returns to latest
+│   │   ├── Existing viewport controller confirms latest position
+│   │   └── State transition sets follow_latest = true
+│   │
+│   ├── 7.5 Define new-bar behavior
+│   │   ├── FOLLOWING_LATEST
+│   │   │   └── Existing viewport controller advances viewport
+│   │   └── USER_NAVIGATED
+│   │       └── Preserve current viewport
+│   │
+│   └── 7.6 Prohibit implicit auto-follow
+│       ├── New data must not automatically reset viewport
+│       └── User navigation always takes precedence
+│
+├── 8. Define Price-Scale State
+│   │
+│   ├── 8.1 Define position
+│   │   └── Default = "right"
+│   │
+│   ├── 8.2 Define mode
+│   │   └── Default = "normal"
+│   │
+│   ├── 8.3 Define auto_scale
+│   │   └── Default = true
+│   │
+│   ├── 8.4 Define visible_range
+│   │   └── Default = None
+│   │
+│   ├── 8.5 Define visible_from
+│   │   ├── Optional persistent range value
+│   │   └── Must remain independent of pixel coordinates
+│   │
+│   ├── 8.6 Define visible_to
+│   │   ├── Optional persistent range value
+│   │   └── Must remain independent of pixel coordinates
+│   │
+│   └── 8.7 Preserve PriceScale ownership
+│       ├── ChartState stores configuration/range state
+│       ├── Existing PriceScale performs price transformation
+│       └── ChartState never calculates price-to-pixel coordinates
+│
+├── 9. Define Visual State
+│   │
+│   ├── 9.1 Define background configuration
+│   │   ├── Persistent visual option
+│   │   └── Renderer remains responsible for drawing
+│   │
+│   ├── 9.2 Define grid configuration
+│   │   ├── Visibility
+│   │   ├── Style configuration
+│   │   └── Renderer remains authoritative
+│   │
+│   ├── 9.3 Define crosshair configuration
+│   │   ├── Visibility
+│   │   ├── Mode
+│   │   ├── Style
+│   │   └── Crosshair engine remains authoritative
+│   │
+│   ├── 9.4 Define localization configuration
+│   │   ├── Locale
+│   │   ├── Time formatting preferences
+│   │   └── Number formatting preferences
+│   │
+│   └── 9.5 Exclude transient visual state
+│       ├── Mouse coordinates excluded
+│       ├── Hover target excluded
+│       ├── Active pointer excluded
+│       ├── Temporary animation state excluded
+│       └── Temporary interaction state excluded
+│
+├── 10. Define Pane State
+│   │
+│   ├── 10.1 Define pane identity
+│   │   └── Stable pane identifier
+│   │
+│   ├── 10.2 Define pane order
+│   │   ├── Store ordered pane IDs
+│   │   └── Preserve order during restoration
+│   │
+│   ├── 10.3 Define pane size
+│   │   ├── Store persistent size configuration
+│   │   └── Do not store Canvas geometry
+│   │
+│   ├── 10.4 Define pane visibility
+│   │   └── Store visible/hidden state
+│   │
+│   ├── 10.5 Define pane validation
+│   │   ├── Remove duplicate pane IDs
+│   │   ├── Reject invalid pane references
+│   │   └── Preserve project-required main pane
+│   │
+│   └── 10.6 Preserve future layout boundary
+│       ├── Store pane configuration only
+│       └── Do not implement workspace layout
+│
+├── 11. Define Series State
+│   │
+│   ├── 11.1 Define series identity
+│   │   └── Stable series identifier
+│   │
+│   ├── 11.2 Define series type
+│   │   ├── Candlestick
+│   │   ├── Line
+│   │   ├── Area
+│   │   ├── Histogram
+│   │   └── Other project-supported series types
+│   │
+│   ├── 11.3 Define series visibility
+│   │   └── Default according to existing series configuration
+│   │
+│   ├── 11.4 Define series style
+│   │   ├── Persistent visual configuration only
+│   │   └── No Canvas objects
+│   │
+│   ├── 11.5 Define price_scale_id
+│   │   └── Reference authoritative PriceScale
+│   │
+│   ├── 11.6 Define series ordering
+│   │   └── Preserve deterministic rendering/configuration order
+│   │
+│   └── 11.7 Exclude market data
+│       ├── Do not serialize OHLCV dataset
+│       ├── Do not serialize runtime feed objects
+│       └── Store series configuration/reference only
+│
+├── 12. Define Drawing State
+│   │
+│   ├── 12.1 Define drawing identity
+│   │   └── Stable drawing object ID
+│   │
+│   ├── 12.2 Define drawing type
+│   │   └── Existing Drawing Engine type identifier
+│   │
+│   ├── 12.3 Define drawing persistent properties
+│   │   ├── Anchors
+│   │   ├── Style
+│   │   ├── Visibility
+│   │   └── Configuration required for reconstruction
+│   │
+│   ├── 12.4 Define drawing visibility
+│   │   └── Persistent visible/hidden state
+│   │
+│   ├── 12.5 Preserve Drawing Engine ownership
+│   │   ├── ChartState stores serialized drawing configuration
+│   │   ├── Drawing Engine reconstructs geometry
+│   │   └── ChartState does not calculate drawing geometry
+│   │
+│   └── 12.6 Exclude transient drawing state
+│       ├── Active drag excluded
+│       ├── Selection handles excluded unless persistent by design
+│       ├── Hover state excluded
+│       └── Temporary interaction state excluded
+│
+├── 13. Define Runtime vs Persistent State Boundary
+│   │
+│   ├── 13.1 Persistent state
+│   │   ├── Symbol
+│   │   ├── Exchange
+│   │   ├── Market session
+│   │   ├── Timeframe
+│   │   ├── Viewport
+│   │   ├── Follow-latest
+│   │   ├── Price-scale configuration
+│   │   ├── Visual configuration
+│   │   ├── Pane configuration
+│   │   ├── Series configuration
+│   │   └── Drawing configuration
+│   │
+│   ├── 13.2 Runtime-only state
+│   │   ├── Active pointer
+│   │   ├── Mouse position
+│   │   ├── Pressed buttons
+│   │   ├── Gesture state
+│   │   ├── Drag state
+│   │   ├── Hover target
+│   │   ├── Temporary selection
+│   │   ├── Render-pending state
+│   │   ├── Dirty flags
+│   │   └── Canvas IDs
+│   │
+│   └── 13.3 Serialization rule
+│       └── Runtime-only state must never be serialized automatically
+│
+├── 14. Implement Typed State Structures
+│   │
+│   ├── 14.1 Create ChartIdentityState
+│   ├── 14.2 Create ResolutionState
+│   ├── 14.3 Create TimeScaleState
+│   ├── 14.4 Create ViewportState
+│   ├── 14.5 Create PriceScaleState
+│   ├── 14.6 Create VisualState
+│   ├── 14.7 Create PaneState
+│   ├── 14.8 Create SeriesState
+│   ├── 14.9 Create DrawingState
+│   └── 14.10 Compose ChartState
+│       ├── Use dataclasses/typed structures
+│       ├── Avoid untyped nested dictionaries internally
+│       └── Keep serialization representation separate where appropriate
+│
+├── 15. Implement Default State Factory
+│   │
+│   ├── 15.1 Create default identity
+│   ├── 15.2 Create default resolution
+│   ├── 15.3 Create default time scale
+│   │   ├── bar_spacing = 6.0
+│   │   ├── min_bar_spacing = 0.5
+│   │   ├── max_bar_spacing = 0
+│   │   ├── right_offset = 0
+│   │   ├── fix_left_edge = false
+│   │   ├── fix_right_edge = false
+│   │   ├── ticks_visible = false
+│   │   ├── minimum_height = 0
+│   │   ├── allow_bold_labels = true
+│   │   ├── ignore_whitespace_indices = false
+│   │   └── enable_conflation = false
+│   │
+│   ├── 15.4 Create default viewport
+│   │   ├── follow_latest = true
+│   │   └── logical range established by existing viewport engine
+│   │
+│   ├── 15.5 Create default price scale
+│   │   ├── position = right
+│   │   ├── mode = normal
+│   │   ├── auto_scale = true
+│   │   └── visible_range = None
+│   │
+│   ├── 15.6 Create default visual state
+│   ├── 15.7 Create default pane state
+│   ├── 15.8 Create default series state
+│   ├── 15.9 Create default drawing state
+│   └── 15.10 Verify defaults against schema
+│
+├── 16. Implement Controlled State Mutation
+│   │
+│   ├── 16.1 Implement chart_state.get()
+│   │   └── Return immutable/read-safe representation
+│   │
+│   ├── 16.2 Implement chart_state.update(...)
+│   │   ├── Validate requested changes
+│   │   ├── Determine affected state domains
+│   │   ├── Apply atomic update
+│   │   ├── Generate change event
+│   │   └── Trigger existing invalidation pipeline where required
+│   │
+│   ├── 16.3 Implement set_symbol(...)
+│   │   ├── Validate symbol
+│   │   ├── Compare old/new value
+│   │   ├── Set identity state
+│   │   ├── Emit identity_changed
+│   │   └── Trigger symbol transition workflow
+│   │
+│   ├── 16.4 Implement set_timeframe(...)
+│   │   ├── Validate timeframe
+│   │   ├── Set resolution
+│   │   ├── Emit resolution_changed
+│   │   └── Trigger series/data reconciliation
+│   │
+│   ├── 16.5 Implement set_viewport(...)
+│   │   ├── Validate fractional logical range
+│   │   ├── Validate spacing
+│   │   ├── Preserve floating-point values
+│   │   ├── Delegate constraints to viewport controller
+│   │   └── Emit viewport_changed
+│   │
+│   ├── 16.6 Implement set_follow_latest(...)
+│   │   ├── Set FOLLOWING_LATEST or USER_NAVIGATED
+│   │   ├── Emit viewport_changed
+│   │   └── Do not directly move Canvas
+│   │
+│   ├── 16.7 Implement set_price_scale(...)
+│   │   ├── Validate mode
+│   │   ├── Validate position
+│   │   ├── Set auto_scale
+│   │   └── Emit price_scale_changed
+│   │
+│   ├── 16.8 Implement set_series_state(...)
+│   │   ├── Validate series ID
+│   │   ├── Update visibility/style/scale reference
+│   │   └── Emit series_changed
+│   │
+│   ├── 16.9 Implement set_pane_state(...)
+│   │   ├── Validate pane
+│   │   ├── Update order/size/visibility
+│   │   └── Emit pane_changed
+│   │
+│   └── 16.10 Implement visual-state mutations
+│       ├── Validate visual configuration
+│       ├── Update state
+│       └── Emit visual_changed
+│
+├── 17. Implement Change Notification Engine
+│   │
+│   ├── 17.1 Define ChartStateChanged event
+│   │   ├── event type
+│   │   ├── changed domains
+│   │   ├── previous state/reference
+│   │   └── current state/reference
+│   │
+│   ├── 17.2 Define change categories
+│   │   ├── identity_changed
+│   │   ├── resolution_changed
+│   │   ├── viewport_changed
+│   │   ├── price_scale_changed
+│   │   ├── visual_changed
+│   │   ├── pane_changed
+│   │   ├── series_changed
+│   │   └── drawings_changed
+│   │
+│   ├── 17.3 Implement subscribe(...)
+│   ├── 17.4 Implement unsubscribe(...)
+│   ├── 17.5 Notify subscribers after successful mutation
+│   ├── 17.6 Do not notify for unchanged values
+│   └── 17.7 Protect notification dispatch
+│       ├── One failing subscriber must not corrupt state
+│       └── State mutation must remain atomic
+│
+├── 18. Integrate State Changes With Existing Invalidation
+│   │
+│   ├── 18.1 Identity change
+│   │   ├── Invalidate data context
+│   │   └── Do not directly render
+│   │
+│   ├── 18.2 Resolution change
+│   │   ├── Invalidate series/data context
+│   │   └── Reconcile viewport
+│   │
+│   ├── 18.3 Viewport change
+│   │   ├── Use existing viewport invalidation
+│   │   └── Preserve existing scheduler
+│   │
+│   ├── 18.4 Price-scale change
+│   │   └── Use existing PriceScale invalidation
+│   │
+│   ├── 18.5 Visual change
+│   │   └── Use existing style/render invalidation
+│   │
+│   ├── 18.6 Pane change
+│   │   └── Delegate to existing pane/layout mechanisms
+│   │
+│   ├── 18.7 Series change
+│   │   └── Delegate to existing series/compositor invalidation
+│   │
+│   └── 18.8 Drawing change
+│       └── Delegate to existing Drawing Engine invalidation
+│
+├── 19. Implement State Snapshot
+│   │
+│   ├── 19.1 Implement capture_state()
+│   │   ├── Capture state_version
+│   │   ├── Capture identity
+│   │   ├── Capture resolution
+│   │   ├── Capture viewport
+│   │   ├── Capture price scale
+│   │   ├── Capture visual state
+│   │   ├── Capture panes
+│   │   ├── Capture series
+│   │   └── Capture drawings
+│   │
+│   ├── 19.2 Exclude runtime state
+│   │   ├── No Canvas IDs
+│   │   ├── No mouse state
+│   │   ├── No render scheduler state
+│   │   └── No temporary gesture state
+│   │
+│   ├── 19.3 Preserve fractional values
+│   │   ├── logical_from remains float
+│   │   ├── logical_to remains float
+│   │   └── bar_spacing remains exact persisted value
+│   │
+│   └── 19.4 Ensure deterministic snapshot
+│       ├── Stable key structure
+│       ├── Stable ordering
+│       └── No runtime object references
+│
+├── 20. Implement State Serializer
+│   │
+│   ├── 20.1 Serialize ChartState
+│   ├── 20.2 Serialize typed nested structures
+│   ├── 20.3 Preserve numeric precision
+│   ├── 20.4 Preserve null/None values
+│   ├── 20.5 Preserve enum/string values
+│   ├── 20.6 Reject unsupported runtime objects
+│   └── 20.7 Produce project-compatible serialized representation
+│
+├── 21. Implement State Deserializer
+│   │
+│   ├── 21.1 Parse serialized representation
+│   ├── 21.2 Validate root structure
+│   ├── 21.3 Validate state_version
+│   ├── 21.4 Validate nested structures
+│   ├── 21.5 Validate numeric ranges
+│   ├── 21.6 Validate enumerations
+│   ├── 21.7 Reject malformed values safely
+│   └── 21.8 Produce validated intermediate state
+│
+├── 22. Implement State Migration
+│   │
+│   ├── 22.1 Detect snapshot version
+│   ├── 22.2 If version == current
+│   │   └── Use directly
+│   ├── 22.3 If version < current
+│   │   ├── Apply migrations sequentially
+│   │   └── Produce current schema
+│   ├── 22.4 If version > current
+│   │   └── Reject safely
+│   └── 22.5 Keep migration logic independent
+│       └── Do not embed migration rules inside renderers
+│
+├── 23. Implement State Restore
+│   │
+│   ├── 23.1 Implement restore_state(snapshot)
+│   │
+│   ├── 23.2 Validate snapshot before mutation
+│   │   ├── Deserialize
+│   │   ├── Migrate
+│   │   └── Validate
+│   │
+│   ├── 23.3 Restore identity
+│   │   ├── chart_id
+│   │   ├── symbol
+│   │   ├── exchange
+│   │   └── market_session
+│   │
+│   ├── 23.4 Restore resolution
+│   │   └── timeframe
+│   │
+│   ├── 23.5 Establish data/series context
+│   │   ├── Ensure required series context exists
+│   │   └── Do not restore viewport before context exists
+│   │
+│   ├── 23.6 Restore panes
+│   │   ├── Order
+│   │   ├── Size
+│   │   └── Visibility
+│   │
+│   ├── 23.7 Restore price-scale configuration
+│   │   ├── position
+│   │   ├── mode
+│   │   ├── auto_scale
+│   │   └── compatible visible range
+│   │
+│   ├── 23.8 Restore viewport
+│   │   ├── bar_spacing
+│   │   ├── logical_from
+│   │   ├── logical_to
+│   │   ├── right_offset
+│   │   └── follow_latest
+│   │
+│   ├── 23.9 Clamp viewport
+│   │   └── Existing viewport controller remains authoritative
+│   │
+│   ├── 23.10 Restore visual state
+│   ├── 23.11 Restore series configuration
+│   ├── 23.12 Restore drawings
+│   ├── 23.13 Emit appropriate state changes
+│   └── 23.14 Trigger existing invalidation/render pipeline
+│
+├── 24. Implement Atomic Restore
+│   │
+│   ├── 24.1 Validate entire snapshot before mutation
+│   ├── 24.2 Build candidate state
+│   ├── 24.3 Reconcile dependencies
+│   ├── 24.4 Commit only after validation succeeds
+│   ├── 24.5 Preserve current state if restore fails
+│   └── 24.6 Never leave partially restored state
+│
+├── 25. Implement Symbol Transition
+│   │
+│   ├── 25.1 Receive new symbol
+│   ├── 25.2 Validate symbol
+│   ├── 25.3 Mark old data context invalid
+│   ├── 25.4 Load/reconcile new series externally
+│   ├── 25.5 Determine viewport compatibility
+│   │   ├── Same timeframe → attempt compatible viewport restore
+│   │   └── Incompatible context → establish valid initial viewport
+│   ├── 25.6 Reconcile price scale
+│   │   ├── Do not blindly preserve unrelated price range
+│   │   └── Auto-scale when required
+│   ├── 25.7 Preserve compatible visual state
+│   ├── 25.8 Preserve compatible pane state
+│   ├── 25.9 Preserve compatible series configuration
+│   └── 25.10 Invalidate/render through existing systems
+│
+├── 26. Implement Timeframe Transition
+│   │
+│   ├── 26.1 Receive new timeframe
+│   ├── 26.2 Validate timeframe
+│   ├── 26.3 Invalidate old resolution context
+│   ├── 26.4 Establish new series/data context
+│   ├── 26.5 Determine compatible viewport
+│   ├── 26.6 Preserve follow_latest where appropriate
+│   ├── 26.7 Reconcile price scale
+│   ├── 26.8 Preserve visual configuration
+│   └── 26.9 Trigger existing invalidation/render pipeline
+│
+├── 27. Implement View Reset
+│   │
+│   ├── 27.1 Implement reset_view()
+│   ├── 27.2 Restore default bar_spacing
+│   │   └── 6.0
+│   ├── 27.3 Restore default right_offset
+│   │   └── 0
+│   ├── 27.4 Restore follow_latest
+│   │   └── true
+│   ├── 27.5 Request valid initial viewport from existing controller
+│   ├── 27.6 Preserve symbol/timeframe
+│   └── 27.7 Trigger viewport invalidation
+│
+├── 28. Implement Price-Scale Reset
+│   │
+│   ├── 28.1 Implement reset_price_scale()
+│   ├── 28.2 Set position = right
+│   ├── 28.3 Set mode = normal
+│   ├── 28.4 Set auto_scale = true
+│   ├── 28.5 Set visible_range = None
+│   ├── 28.6 Delegate recalculation to existing PriceScale
+│   └── 28.7 Trigger price-scale invalidation
+│
+├── 29. Implement Visual Reset
+│   │
+│   ├── 29.1 Implement reset_visual_state()
+│   ├── 29.2 Restore default background
+│   ├── 29.3 Restore default grid configuration
+│   ├── 29.4 Restore default crosshair configuration
+│   ├── 29.5 Restore default localization
+│   └── 29.6 Trigger visual invalidation
+│
+├── 30. Implement Full Chart Reset
+│   │
+│   ├── 30.1 Implement reset_chart_state()
+│   ├── 30.2 Preserve chart identity if project requires
+│   ├── 30.3 Restore default resolution
+│   ├── 30.4 Restore default viewport
+│   ├── 30.5 Restore default price scale
+│   ├── 30.6 Restore default visual state
+│   ├── 30.7 Restore default pane state
+│   ├── 30.8 Restore default series configuration
+│   ├── 30.9 Clear persistent drawings when reset semantics require
+│   └── 30.10 Do not destroy/recreate chart instance
+│
+├── 31. Implement Follow-Latest Integration
+│   │
+│   ├── 31.1 Receive current-bar update
+│   │   ├── Preserve viewport position
+│   │   └── Update state only where required
+│   │
+│   ├── 31.2 Receive new-bar append
+│   │   ├── FOLLOWING_LATEST → advance existing viewport
+│   │   └── USER_NAVIGATED → preserve viewport
+│   │
+│   ├── 31.3 Receive historical-data update
+│   │   ├── Preserve viewport
+│   │   └── Do not force latest
+│   │
+│   └── 31.4 Preserve existing interaction engine
+│       └── State engine only records follow state
+│
+├── 32. Integrate With Existing Interaction Engine
+│   │
+│   ├── 32.1 User pan begins
+│   │   └── Existing Interaction Engine remains authoritative
+│   │
+│   ├── 32.2 User pan changes viewport
+│   │   └── Notify ChartState of resulting persistent viewport state
+│   │
+│   ├── 32.3 User zooms
+│   │   └── Existing TimeScale/Viewport handles mechanics
+│   │
+│   ├── 32.4 User zoom changes persistent bar_spacing
+│   │   └── Synchronize resulting value into ChartState
+│   │
+│   ├── 32.5 User returns to latest
+│   │   └── Set follow_latest = true
+│   │
+│   └── 32.6 Do not duplicate gestures
+│       ├── No second pan implementation
+│       ├── No second zoom implementation
+│       └── No second viewport controller
+│
+├── 33. Implement State Synchronization With Existing Subsystems
+│   │
+│   ├── 33.1 TimeScale → ChartState
+│   │   ├── Read resulting persistent configuration
+│   │   └── Store bar_spacing/right_offset where required
+│   │
+│   ├── 33.2 Viewport Controller → ChartState
+│   │   ├── Read logical range
+│   │   └── Store fractional viewport state
+│   │
+│   ├── 33.3 PriceScale → ChartState
+│   │   └── Synchronize persistent scale configuration
+│   │
+│   ├── 33.4 Pane system → ChartState
+│   │   └── Synchronize persistent pane configuration
+│   │
+│   ├── 33.5 Series system → ChartState
+│   │   └── Synchronize persistent series configuration
+│   │
+│   └── 33.6 Drawing system → ChartState
+│       └── Synchronize persistent drawing configuration
+│
+├── 34. Prevent State Feedback Loops
+│   │
+│   ├── 34.1 Detect state-originated subsystem update
+│   ├── 34.2 Detect subsystem-originated state update
+│   ├── 34.3 Avoid recursive notification
+│   ├── 34.4 Avoid repeated invalidation
+│   └── 34.5 Ensure one logical change produces one state transition
+│
+├── 35. Implement Persistence API
+│   │
+│   ├── 35.1 chart_state.get()
+│   ├── 35.2 chart_state.update(...)
+│   ├── 35.3 chart_state.snapshot()
+│   ├── 35.4 chart_state.restore(...)
+│   ├── 35.5 chart_state.reset()
+│   ├── 35.6 chart_state.subscribe(...)
+│   ├── 35.7 chart_state.unsubscribe(...)
+│   ├── 35.8 set_symbol(...)
+│   ├── 35.9 set_timeframe(...)
+│   ├── 35.10 set_viewport(...)
+│   ├── 35.11 set_follow_latest(...)
+│   ├── 35.12 set_price_scale(...)
+│   ├── 35.13 set_series_state(...)
+│   └── 35.14 set_pane_state(...)
+│
+├── 36. Implement Initialization Tests
+│   │
+│   ├── 36.1 Verify ChartState creation
+│   ├── 36.2 Verify state_version = 1
+│   ├── 36.3 Verify bar_spacing = 6.0
+│   ├── 36.4 Verify min_bar_spacing = 0.5
+│   ├── 36.5 Verify right_offset = 0
+│   ├── 36.6 Verify follow_latest = true
+│   ├── 36.7 Verify fix_left_edge = false
+│   ├── 36.8 Verify fix_right_edge = false
+│   ├── 36.9 Verify ticks_visible = false
+│   ├── 36.10 Verify minimum_height = 0
+│   ├── 36.11 Verify allow_bold_labels = true
+│   ├── 36.12 Verify ignore_whitespace_indices = false
+│   ├── 36.13 Verify enable_conflation = false
+│   ├── 36.14 Verify price position = right
+│   ├── 36.15 Verify price mode = normal
+│   ├── 36.16 Verify auto_scale = true
+│   └── 36.17 Verify visible_range = None
+│
+├── 37. Implement Viewport Persistence Tests
+│   │
+│   ├── 37.1 Save viewport
+│   ├── 37.2 Restore viewport
+│   ├── 37.3 Preserve logical_from fractional value
+│   ├── 37.4 Preserve logical_to fractional value
+│   ├── 37.5 Preserve bar_spacing
+│   ├── 37.6 Preserve right_offset
+│   ├── 37.7 Preserve follow_latest
+│   ├── 37.8 Reject NaN viewport
+│   ├── 37.9 Reject infinite viewport
+│   └── 37.10 Verify viewport controller clamps invalid range
+│
+├── 38. Implement Follow-Latest Tests
+│   │
+│   ├── 38.1 Verify initial FOLLOWING_LATEST
+│   ├── 38.2 Simulate user pan
+│   ├── 38.3 Verify USER_NAVIGATED
+│   ├── 38.4 Append new data while USER_NAVIGATED
+│   ├── 38.5 Verify viewport remains unchanged
+│   ├── 38.6 Return user to latest
+│   ├── 38.7 Verify FOLLOWING_LATEST
+│   ├── 38.8 Append new data while FOLLOWING_LATEST
+│   └── 38.9 Verify viewport advances through existing controller
+│
+├── 39. Implement Symbol Transition Tests
+│   │
+│   ├── 39.1 Change symbol
+│   ├── 39.2 Verify identity_changed
+│   ├── 39.3 Verify old data context invalidation
+│   ├── 39.4 Verify compatible viewport restoration
+│   ├── 39.5 Verify incompatible viewport rejection/reconciliation
+│   ├── 39.6 Verify unrelated price range is not blindly reused
+│   └── 39.7 Verify existing rendering pipeline remains authoritative
+│
+├── 40. Implement Timeframe Transition Tests
+│   │
+│   ├── 40.1 Change timeframe
+│   ├── 40.2 Verify resolution_changed
+│   ├── 40.3 Verify data context reconciliation
+│   ├── 40.4 Verify follow_latest compatibility
+│   ├── 40.5 Verify viewport compatibility
+│   └── 40.6 Verify price-scale reconciliation
+│
+├── 41. Implement Snapshot/Restore Tests
+│   │
+│   ├── 41.1 Capture default state
+│   ├── 41.2 Capture modified state
+│   ├── 41.3 Serialize state
+│   ├── 41.4 Deserialize state
+│   ├── 41.5 Restore state
+│   ├── 41.6 Compare source and restored state
+│   ├── 41.7 Verify state_version exists
+│   ├── 41.8 Verify fractional values survive
+│   ├── 41.9 Verify None values survive
+│   └── 41.10 Verify runtime-only values are absent
+│
+├── 42. Implement Invalid Snapshot Tests
+│   │
+│   ├── 42.1 Missing version
+│   ├── 42.2 Unsupported version
+│   ├── 42.3 Future version
+│   ├── 42.4 Missing required identity
+│   ├── 42.5 Invalid timeframe
+│   ├── 42.6 Invalid bar_spacing
+│   ├── 42.7 bar_spacing below minimum
+│   ├── 42.8 NaN logical range
+│   ├── 42.9 Infinite logical range
+│   ├── 42.10 Invalid price-scale mode
+│   ├── 42.11 Invalid pane reference
+│   ├── 42.12 Invalid series reference
+│   ├── 42.13 Malformed drawing state
+│   └── 42.14 Verify current state remains unchanged after failed restore
+│
+├── 43. Implement Reset Tests
+│   │
+│   ├── 43.1 Modify viewport
+│   ├── 43.2 reset_view()
+│   ├── 43.3 Verify bar_spacing = 6.0
+│   ├── 43.4 Verify right_offset = 0
+│   ├── 43.5 Verify follow_latest = true
+│   ├── 43.6 Modify price scale
+│   ├── 43.7 reset_price_scale()
+│   ├── 43.8 Verify right/normal/auto-scale defaults
+│   ├── 43.9 Modify visual state
+│   ├── 43.10 reset_visual_state()
+│   ├── 43.11 Modify complete chart state
+│   ├── 43.12 reset_chart_state()
+│   └── 43.13 Verify chart instance was not destroyed/recreated
+│
+├── 44. Implement Notification Tests
+│   │
+│   ├── 44.1 Subscribe listener
+│   ├── 44.2 Change symbol
+│   ├── 44.3 Verify identity_changed
+│   ├── 44.4 Change timeframe
+│   ├── 44.5 Verify resolution_changed
+│   ├── 44.6 Change viewport
+│   ├── 44.7 Verify viewport_changed
+│   ├── 44.8 Change price scale
+│   ├── 44.9 Verify price_scale_changed
+│   ├── 44.10 Change visual state
+│   ├── 44.11 Verify visual_changed
+│   ├── 44.12 Set identical value
+│   └── 44.13 Verify no unnecessary notification
+│
+├── 45. Implement State Isolation Tests
+│   │
+│   ├── 45.1 Verify ChartState never accesses Canvas
+│   ├── 45.2 Verify ChartState never creates Canvas objects
+│   ├── 45.3 Verify ChartState never calculates pixel coordinates
+│   ├── 45.4 Verify ChartState never handles mouse events
+│   ├── 45.5 Verify ChartState never implements zoom
+│   ├── 45.6 Verify ChartState never implements pan
+│   ├── 45.7 Verify ChartState never implements crosshair behavior
+│   ├── 45.8 Verify ChartState never implements drawing geometry
+│   ├── 45.9 Verify ChartState never loads market data
+│   └── 45.10 Verify TimeScale remains authoritative
+│
+├── 46. Implement Regression Tests
+│   │
+│   ├── 46.1 Existing chart initialization tests remain passing
+│   ├── 46.2 Existing pan tests remain passing
+│   ├── 46.3 Existing zoom tests remain passing
+│   ├── 46.4 Existing cursor-centered zoom tests remain passing
+│   ├── 46.5 Existing viewport tests remain passing
+│   ├── 46.6 Existing crosshair tests remain passing
+│   ├── 46.7 Existing rendering tests remain passing
+│   ├── 46.8 Existing compositor tests remain passing
+│   └── 46.9 Existing drawing tests remain passing
+│
+└── 47. Final Architectural Validation
+    │
+    ├── 47.1 Verify centralized ChartState exists
+    ├── 47.2 Verify runtime/persistent boundary exists
+    ├── 47.3 Verify schema version exists
+    ├── 47.4 Verify snapshot/restore works
+    ├── 47.5 Verify migrations boundary exists
+    ├── 47.6 Verify state notifications work
+    ├── 47.7 Verify follow-latest state machine works
+    ├── 47.8 Verify symbol/timeframe reconciliation works
+    ├── 47.9 Verify reset operations work
+    ├── 47.10 Verify TimeScale remains authoritative
+    ├── 47.11 Verify PriceScale remains authoritative
+    ├── 47.12 Verify Viewport Controller remains authoritative
+    ├── 47.13 Verify Interaction Engine remains authoritative
+    ├── 47.14 Verify Renderer/Compositor remains authoritative
+    ├── 47.15 Verify no duplicate coordinate system exists
+    ├── 47.16 Verify no duplicate viewport engine exists
+    ├── 47.17 Verify no Canvas state is persisted
+    ├── 47.18 Verify all existing interaction tests pass
+    └── 47.19 Mark CHART STATE & SESSION PERSISTENCE ENGINE structurally complete
+        │
+        └── NEXT:
+            CHART LAYOUT / WORKSPACE ENGINE

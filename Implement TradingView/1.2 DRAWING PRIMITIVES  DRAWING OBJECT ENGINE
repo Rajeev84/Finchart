@@ -1,0 +1,1378 @@
+DRAWING PRIMITIVES / DRAWING OBJECT ENGINE
+│
+├── T1. DRAWING OBJECT FOUNDATION
+│   │
+│   ├── T1.1 Define DrawingObject
+│   │   │
+│   │   ├── T1.1.1 Define persistent identity fields
+│   │   │   ├── drawing_id
+│   │   │   │   ├── type: string
+│   │   │   │   ├── globally unique within chart/document
+│   │   │   │   ├── stable across redraw
+│   │   │   │   ├── stable across selection
+│   │   │   │   ├── stable across movement
+│   │   │   │   ├── stable across serialization
+│   │   │   │   └── stable across deserialization
+│   │   │   │
+│   │   │   ├── drawing_type
+│   │   │   │   ├── values:
+│   │   │   │   │   ├── line
+│   │   │   │   │   ├── ray
+│   │   │   │   │   ├── horizontal_line
+│   │   │   │   │   ├── vertical_line
+│   │   │   │   │   ├── rectangle
+│   │   │   │   │   ├── circle
+│   │   │   │   │   ├── ellipse
+│   │   │   │   │   ├── arc
+│   │   │   │   │   ├── text
+│   │   │   │   │   ├── polyline
+│   │   │   │   │   └── triangle
+│   │   │   │   └── immutable after creation
+│   │   │   │
+│   │   │   ├── creation_order
+│   │   │   │   └── monotonically increasing integer
+│   │   │   │
+│   │   │   ├── z_order
+│   │   │   │   └── default = 100
+│   │   │   │
+│   │   │   ├── visible
+│   │   │   │   └── default = true
+│   │   │   │
+│   │   │   ├── locked
+│   │   │   │   └── default = false
+│   │   │   │
+│   │   │   ├── selected
+│   │   │   │   └── default = false
+│   │   │   │
+│   │   │   ├── style
+│   │   │   │   └── DrawingStyle reference/value
+│   │   │   │
+│   │   │   ├── anchors
+│   │   │   │   └── ordered DrawingPoint collection
+│   │   │   │
+│   │   │   ├── text_configuration
+│   │   │   │   └── optional annotation state
+│   │   │   │
+│   │   │   └── metadata
+│   │   │       └── arbitrary application-specific data
+│   │   │
+│   │   ├── T1.1.2 Define searchable drawing identity
+│   │   │   ├── drawing_id = unique runtime/persistent identity
+│   │   │   ├── drawing_type = primitive category
+│   │   │   ├── optional drawing_name = user/application name
+│   │   │   ├── optional object_path = hierarchical identity
+│   │   │   ├── optional semantic_id = application-defined searchable identifier
+│   │   │   ├── support exact ID lookup
+│   │   │   ├── support type lookup
+│   │   │   ├── support name lookup
+│   │   │   ├── support wildcard/prefix lookup
+│   │   │   └── example searchable identifiers:
+│   │   │       ├── subplot_shape_numeric(RSI_upperline_1)
+│   │   │       ├── RSI_upperline_1
+│   │   │       ├── custom_indicator_RSI_upperline_1
+│   │   │       └── custom_indicator*
+│   │   │
+│   │   ├── T1.1.3 Define identity lookup rules
+│   │   │   ├── exact drawing_id → one drawing
+│   │   │   ├── exact semantic_id → one or more drawings
+│   │   │   ├── exact drawing_type → all matching drawings
+│   │   │   ├── prefix search → all matching drawings
+│   │   │   ├── wildcard "*" → zero or more characters
+│   │   │   ├── search must never use Canvas item ID
+│   │   │   └── Canvas ID remains rendering-resource identity only
+│   │   │
+│   │   └── T1.1.4 Define object lifecycle
+│   │       ├── CREATED
+│   │       ├── ACTIVE
+│   │       ├── HIDDEN
+│   │       ├── LOCKED
+│   │       ├── SELECTED
+│   │       └── DELETED
+│   │
+│   ├── T1.2 Define DrawingPoint
+│   │   │
+│   │   ├── logical_index: float
+│   │   ├── price: float
+│   │   ├── logical_index may be fractional
+│   │   ├── price may be fractional
+│   │   ├── never store x_pixel as authoritative state
+│   │   └── never store y_pixel as authoritative state
+│   │
+│   ├── T1.3 Define DrawingStyle
+│   │   │
+│   │   ├── stroke_color = #2962FF
+│   │   ├── stroke_width = 2.0
+│   │   ├── stroke_style = SOLID
+│   │   ├── stroke_opacity = 1.0
+│   │   ├── fill_enabled = false
+│   │   ├── fill_color = #2962FF
+│   │   ├── fill_opacity = 0.10
+│   │   ├── selected_stroke_color = #2962FF
+│   │   ├── selected_stroke_width = 2.0
+│   │   ├── handle_color = #FFFFFF
+│   │   ├── handle_border_color = #2962FF
+│   │   ├── handle_border_width = 1.0
+│   │   ├── handle_radius = 4.0
+│   │   ├── supported stroke styles:
+│   │   │   ├── SOLID
+│   │   │   ├── DASHED
+│   │   │   └── DOTTED
+│   │   ├── supported standard widths:
+│   │   │   ├── 1
+│   │   │   ├── 2
+│   │   │   ├── 3
+│   │   │   └── 4
+│   │   └── arbitrary positive width allowed internally
+│   │
+│   └── T1.4 Validate DrawingObject state
+│       ├── drawing_id must be non-empty
+│       ├── drawing_type must be registered
+│       ├── z_order must be numeric
+│       ├── stroke_width > 0
+│       ├── opacity in [0.0, 1.0]
+│       ├── anchor count must match primitive requirements
+│       └── invalid object cannot enter DrawingStore
+│
+├── T2. DRAWING COORDINATE SYSTEM
+│   │
+│   ├── T2.1 Store horizontal coordinate
+│   │   ├── authoritative value = logical_index
+│   │   ├── type = float
+│   │   ├── preserve fractional value
+│   │   └── do not round during storage
+│   │
+│   ├── T2.2 Store vertical coordinate
+│   │   ├── authoritative value = price
+│   │   ├── type = float
+│   │   └── preserve fractional value
+│   │
+│   ├── T2.3 Convert logical index to screen X
+│   │   ├── retrieve existing TimeScale
+│   │   ├── retrieve current logical viewport
+│   │   ├── call existing logical-index → pixel transformation
+│   │   └── return x_pixel
+│   │
+│   ├── T2.4 Convert price to screen Y
+│   │   ├── retrieve existing PriceScale
+│   │   ├── retrieve current visible price range
+│   │   ├── call existing price → pixel transformation
+│   │   └── return y_pixel
+│   │
+│   ├── T2.5 Convert screen X to logical index
+│   │   ├── receive mouse_x
+│   │   ├── call existing x → float logical-index transformation
+│   │   └── preserve fractional result
+│   │
+│   ├── T2.6 Convert screen Y to price
+│   │   ├── receive mouse_y
+│   │   ├── call existing y → price transformation
+│   │   └── preserve fractional result
+│   │
+│   └── T2.7 Coordinate invariants
+│       ├── pan changes screen coordinates only
+│       ├── zoom changes screen coordinates only
+│       ├── resize changes screen coordinates only
+│       ├── price-range change changes screen coordinates only
+│       ├── drawing anchors remain unchanged
+│       └── data append does not modify existing anchors
+│
+├── T3. DRAWING Z-ORDER
+│   │
+│   ├── T3.1 Define drawing layer
+│   │   └── DRAWING_Z_DEFAULT = 100
+│   │
+│   ├── T3.2 Define complete rendering order
+│   │   ├── BACKGROUND
+│   │   ├── GRID
+│   │   ├── PRICE_SERIES
+│   │   ├── INDICATOR_SERIES
+│   │   ├── DRAWINGS
+│   │   ├── CROSSHAIR
+│   │   ├── DRAWING_SELECTION
+│   │   ├── DRAWING_HANDLES
+│   │   └── UI_LABELS
+│   │
+│   ├── T3.3 Sort drawings
+│   │   ├── primary key = z_order ascending
+│   │   ├── secondary key = creation_order ascending
+│   │   └── Canvas creation order is never authoritative
+│   │
+│   └── T3.4 Hit-test ordering
+│       ├── iterate z_order descending
+│       ├── creation_order descending for equal z_order
+│       └── first hit is selected
+│
+├── T4. DRAWING GEOMETRY CONTRACT
+│   │
+│   ├── T4.1 Define calculate_geometry()
+│   │   ├── input = DrawingObject + current chart transforms
+│   │   ├── convert anchors to screen coordinates
+│   │   ├── calculate primitive geometry
+│   │   └── return render geometry
+│   │
+│   ├── T4.2 Define render()
+│   │   ├── input = calculated screen geometry
+│   │   ├── input = DrawingStyle
+│   │   ├── call Canvas primitive
+│   │   └── update retained Canvas resource
+│   │
+│   ├── T4.3 Define hit_test()
+│   │   ├── input = mouse_x
+│   │   ├── input = mouse_y
+│   │   ├── calculate distance/containment
+│   │   ├── use DRAWING_HIT_TOLERANCE = 6 px
+│   │   └── return hit result
+│   │
+│   ├── T4.4 Define get_bounds()
+│   │   ├── calculate current screen-space bounds
+│   │   └── return left/top/right/bottom
+│   │
+│   ├── T4.5 Define get_handles()
+│   │   ├── calculate current handle positions
+│   │   └── return handle descriptors
+│   │
+│   ├── T4.6 Define move_by()
+│   │   ├── receive logical_delta
+│   │   ├── receive price_delta
+│   │   ├── apply to all anchors
+│   │   └── preserve fractional values
+│   │
+│   ├── T4.7 Define move_anchor()
+│   │   ├── identify anchor_id
+│   │   ├── receive logical_index
+│   │   ├── receive price
+│   │   └── update only selected anchor
+│   │
+│   ├── T4.8 Define serialize()
+│   │   ├── serialize persistent state
+│   │   ├── exclude Canvas IDs
+│   │   ├── exclude pixel geometry
+│   │   └── return serializable structure
+│   │
+│   └── T4.9 Define deserialize()
+│       ├── validate drawing_type
+│       ├── validate anchors
+│       ├── restore persistent identity
+│       ├── restore style
+│       └── reconstruct rendering resources later
+│
+├── T5. DRAWING REGISTRY
+│   │
+│   ├── T5.1 Create DrawingRegistry
+│   │   ├── registry[type_id] = DrawingDefinition
+│   │   └── type_id values use drawing_type strings
+│   │
+│   ├── T5.2 Register each primitive
+│   │   ├── line
+│   │   ├── ray
+│   │   ├── horizontal_line
+│   │   ├── vertical_line
+│   │   ├── rectangle
+│   │   ├── circle
+│   │   ├── ellipse
+│   │   ├── arc
+│   │   ├── text
+│   │   ├── polyline
+│   │   └── triangle
+│   │
+│   ├── T5.3 Store definition metadata
+│   │   ├── type_id
+│   │   ├── display_name
+│   │   ├── anchor_count
+│   │   ├── creation_mode
+│   │   ├── geometry implementation
+│   │   ├── renderer implementation
+│   │   ├── hit tester implementation
+│   │   ├── serializer implementation
+│   │   └── default style
+│   │
+│   └── T5.4 Registry lookup
+│       ├── type_id → definition
+│       ├── unknown type → validation error
+│       └── renderer must not contain type-specific registration logic
+│
+├── T6. DRAWING STORE
+│   │
+│   ├── T6.1 Create storage
+│   │   ├── drawings_by_id = dictionary
+│   │   ├── drawing_order = ordered ID collection
+│   │   ├── selected_ids = set
+│   │   └── active_drawing_id = optional ID
+│   │
+│   ├── T6.2 add_drawing()
+│   │   ├── validate object
+│   │   ├── reject duplicate drawing_id
+│   │   ├── insert drawings_by_id
+│   │   ├── append drawing_order
+│   │   └── mark drawing data dirty
+│   │
+│   ├── T6.3 get_drawing()
+│   │   ├── receive drawing_id
+│   │   └── return object or not-found
+│   │
+│   ├── T6.4 update_drawing()
+│   │   ├── locate by drawing_id
+│   │   ├── validate changed state
+│   │   └── mark required dirty flags
+│   │
+│   ├── T6.5 remove_drawing()
+│   │   ├── locate by drawing_id
+│   │   ├── remove from selected_ids
+│   │   ├── remove from drawings_by_id
+│   │   ├── remove from drawing_order
+│   │   └── release rendering resource
+│   │
+│   ├── T6.6 visibility
+│   │   ├── visible=false remains stored
+│   │   ├── hidden drawing is not rendered
+│   │   └── hidden drawing is not hit-tested
+│   │
+│   ├── T6.7 locking
+│   │   ├── locked=false permits editing
+│   │   ├── locked=true prevents movement
+│   │   ├── locked=true prevents anchor editing
+│   │   └── locked drawing may remain selectable
+│   │
+│   └── T6.8 searchable lookup
+│       ├── exact drawing_id lookup
+│       ├── exact semantic_id lookup
+│       ├── exact drawing_type lookup
+│       ├── prefix lookup
+│       ├── wildcard lookup
+│       └── return stable drawing objects, never Canvas IDs
+│
+├── T7. DRAWING RENDERER
+│   │
+│   ├── T7.1 Create DrawingRenderer
+│   │   ├── receives DrawingStore
+│   │   ├── receives DrawingRegistry
+│   │   ├── receives TimeScale
+│   │   ├── receives PriceScale
+│   │   └── receives Canvas
+│   │
+│   ├── T7.2 render_all_drawings()
+│   │   ├── retrieve visible drawings
+│   │   ├── filter visible=false
+│   │   ├── sort by z_order
+│   │   ├── calculate geometry
+│   │   ├── update Canvas resources
+│   │   └── render selection state separately
+│   │
+│   ├── T7.3 render_drawing()
+│   │   ├── retrieve drawing by drawing_id
+│   │   ├── calculate geometry
+│   │   ├── retrieve style
+│   │   ├── retrieve pooled Canvas resource
+│   │   └── update resource
+│   │
+│   ├── T7.4 Visibility filtering
+│   │   ├── visible=false → hide Canvas resources
+│   │   └── visible=true → update/render resources
+│   │
+│   ├── T7.5 Selection rendering
+│   │   ├── render normal geometry
+│   │   ├── render selected stroke
+│   │   ├── render handles
+│   │   └── keep overlay above drawing
+│   │
+│   └── T7.6 Performance
+│       ├── do not recreate Canvas items every frame
+│       ├── do not serialize during rendering
+│       ├── do not perform full-data processing
+│       ├── calculate only visible/interacting drawings
+│       └── reuse cached geometry until transform/style changes
+│
+├── T8. DRAWING CANVAS RESOURCE POOL
+│   │
+│   ├── T8.1 Define DrawingCanvasResource
+│   │   ├── drawing_id
+│   │   ├── primitive Canvas IDs
+│   │   ├── selection Canvas IDs
+│   │   ├── handle Canvas IDs
+│   │   └── text/background Canvas IDs where required
+│   │
+│   ├── T8.2 Allocate resources
+│   │   ├── line → 1 Canvas line
+│   │   ├── rectangle → 1 Canvas rectangle
+│   │   ├── circle → 1 Canvas oval
+│   │   ├── ellipse → 1 Canvas oval
+│   │   ├── arc → 1 Canvas arc
+│   │   ├── polygon primitives → 1 Canvas polygon
+│   │   └── text → 1 Canvas text + optional background rectangle
+│   │
+│   ├── T8.3 Update resources
+│   │   ├── retain Canvas item
+│   │   ├── update coordinates
+│   │   ├── update visual properties
+│   │   └── update visibility
+│   │
+│   └── T8.4 Release resources
+│       ├── remove from active pool
+│       ├── recycle where practical
+│       └── never use released Canvas ID as drawing identity
+│
+├── T9. LINE PRIMITIVE
+│   │
+│   ├── T9.1 Store two anchors
+│   │   ├── point_1
+│   │   └── point_2
+│   │
+│   ├── T9.2 Calculate geometry
+│   │   ├── x1 = logical_to_x(point_1.logical_index)
+│   │   ├── y1 = price_to_y(point_1.price)
+│   │   ├── x2 = logical_to_x(point_2.logical_index)
+│   │   └── y2 = price_to_y(point_2.price)
+│   │
+│   ├── T9.3 Render
+│   │   ├── Canvas primitive = line
+│   │   ├── stroke_color = #2962FF
+│   │   ├── stroke_width = 2
+│   │   ├── stroke_style = SOLID
+│   │   └── stroke_opacity = 1.0
+│   │
+│   ├── T9.4 Hit test
+│   │   ├── calculate point-to-segment distance
+│   │   ├── tolerance = 6 px
+│   │   └── hit when distance <= 6 px
+│   │
+│   └── T9.5 Handles
+│       ├── handle_1 = point_1 screen coordinate
+│       └── handle_2 = point_2 screen coordinate
+│
+├── T10. HORIZONTAL LINE PRIMITIVE
+│   │
+│   ├── T10.1 Store
+│   │   └── one DrawingPoint
+│   │
+│   ├── T10.2 Calculate
+│   │   ├── x_start = chart_left
+│   │   ├── x_end = chart_right
+│   │   └── y = price_to_y(anchor.price)
+│   │
+│   ├── T10.3 Render
+│   │   ├── color = #2962FF
+│   │   ├── width = 2
+│   │   └── style = SOLID
+│   │
+│   ├── T10.4 Move
+│   │   ├── horizontal movement does not alter price
+│   │   └── vertical movement updates anchor.price
+│   │
+│   └── T10.5 Extensions
+│       ├── left = false
+│       ├── right = false
+│       └── both = optional mode
+│
+├── T11. VERTICAL LINE PRIMITIVE
+│   │
+│   ├── T11.1 Store
+│   │   └── logical_index
+│   │
+│   ├── T11.2 Calculate
+│   │   ├── x = logical_to_x(logical_index)
+│   │   ├── y_start = chart_top
+│   │   └── y_end = chart_bottom
+│   │
+│   ├── T11.3 Render
+│   │   ├── color = #2962FF
+│   │   ├── width = 1
+│   │   └── style = DASHED
+│   │
+│   └── T11.4 Move
+│       └── horizontal mouse movement → logical_index
+│
+├── T12. RECTANGLE PRIMITIVE
+│   │
+│   ├── T12.1 Store
+│   │   ├── anchor_1
+│   │   └── anchor_2
+│   │
+│   ├── T12.2 Calculate screen points
+│   │   ├── x1
+│   │   ├── y1
+│   │   ├── x2
+│   │   └── y2
+│   │
+│   ├── T12.3 Normalize geometry
+│   │   ├── left_x = min(x1,x2)
+│   │   ├── right_x = max(x1,x2)
+│   │   ├── top_y = min(y1,y2)
+│   │   └── bottom_y = max(y1,y2)
+│   │
+│   ├── T12.4 Render border
+│   │   ├── color = #2962FF
+│   │   ├── width = 2
+│   │   └── style = SOLID
+│   │
+│   ├── T12.5 Render fill
+│   │   ├── fill_enabled = true
+│   │   ├── fill_color = #2962FF
+│   │   └── fill_opacity = 0.10
+│   │
+│   ├── T12.6 Handles
+│   │   ├── top-left
+│   │   ├── top-right
+│   │   ├── bottom-left
+│   │   └── bottom-right
+│   │
+│   └── T12.7 Shift constraint
+│       ├── detect Shift
+│       ├── calculate screen width
+│       ├── calculate screen height
+│       ├── select constrained dimension
+│       └── force width == height
+│
+├── T13. RAY PRIMITIVE
+│   │
+│   ├── T13.1 Reuse line anchor model
+│   ├── T13.2 Calculate dx = x2-x1
+│   ├── T13.3 Calculate dy = y2-y1
+│   ├── T13.4 Detect zero-length direction
+│   │   └── zero direction → render point/short segment safely
+│   ├── T13.5 Extend toward point_2
+│   ├── T13.6 Default extension = right
+│   └── T13.7 Optional extension:
+│       ├── left
+│       ├── right
+│       └── both
+│
+├── T14. CIRCLE PRIMITIVE
+│   │
+│   ├── T14.1 Store
+│   │   ├── anchor_1 = center
+│   │   └── anchor_2 = radius reference
+│   │
+│   ├── T14.2 Convert anchors
+│   │   ├── center_x
+│   │   ├── center_y
+│   │   ├── radius_x
+│   │   └── radius_y
+│   │
+│   ├── T14.3 Use SCREEN CIRCLE mode
+│   │   ├── calculate dx
+│   │   ├── calculate dy
+│   │   ├── radius = sqrt(dx² + dy²)
+│   │   └── use identical pixel radius on X/Y
+│   │
+│   ├── T14.4 Render
+│   │   ├── Canvas primitive = oval
+│   │   ├── border = #2962FF
+│   │   ├── border_width = 2
+│   │   ├── fill_enabled = true
+│   │   ├── fill = #2962FF
+│   │   └── fill_opacity = 0.10
+│   │
+│   └── T14.5 Handles
+│       ├── center handle
+│       └── radius handle
+│
+├── T15. ELLIPSE PRIMITIVE
+│   │
+│   ├── T15.1 Store two opposite-corner anchors
+│   ├── T15.2 Convert both anchors to pixels
+│   ├── T15.3 Calculate left/right/top/bottom
+│   ├── T15.4 Render Canvas oval
+│   ├── T15.5 border = #2962FF
+│   ├── T15.6 border_width = 2
+│   ├── T15.7 fill = #2962FF
+│   ├── T15.8 fill_opacity = 0.10
+│   └── T15.9 Shift → force circle geometry
+│
+├── T16. ARC PRIMITIVE
+│   │
+│   ├── T16.1 Store three anchors
+│   │   ├── start
+│   │   ├── end
+│   │   └── control/curvature
+│   │
+│   ├── T16.2 Calculate circle through three points
+│   │   ├── detect collinear points
+│   │   ├── collinear → fallback to line/degenerate arc
+│   │   ├── calculate circle center
+│   │   └── calculate radius
+│   │
+│   ├── T16.3 Calculate angular geometry
+│   │   ├── start_angle
+│   │   ├── end_angle
+│   │   └── sweep_direction
+│   │
+│   ├── T16.4 Render
+│   │   ├── Canvas primitive = arc
+│   │   ├── stroke_color = #2962FF
+│   │   ├── stroke_width = 2
+│   │   └── fill = none
+│   │
+│   └── T16.5 Handle positions
+│       ├── start
+│       ├── end
+│       └── control
+│
+├── T17. TEXT PRIMITIVE
+│   │
+│   ├── T17.1 Store
+│   │   ├── anchor
+│   │   ├── text = ""
+│   │   ├── font_family = system_default
+│   │   ├── font_size = 12
+│   │   ├── font_weight = normal
+│   │   ├── font_style = normal
+│   │   ├── color = #131722
+│   │   ├── background_enabled = true
+│   │   ├── background_color = #FFFFFF
+│   │   ├── background_opacity = 0.90
+│   │   └── alignment = center
+│   │
+│   ├── T17.2 Calculate anchor pixel position
+│   │   ├── x = logical_to_x(anchor.logical_index)
+│   │   └── y = price_to_y(anchor.price)
+│   │
+│   ├── T17.3 Render background
+│   │   ├── measure text bounds
+│   │   ├── create/update background rectangle
+│   │   └── apply background opacity
+│   │
+│   ├── T17.4 Render text
+│   │   ├── Canvas text
+│   │   ├── font_size = 12
+│   │   └── alignment = center
+│   │
+│   └── T17.5 Supported alignment
+│       ├── left
+│       ├── center
+│       └── right
+│
+├── T18. POLYLINE PRIMITIVE
+│   │
+│   ├── T18.1 Store ordered N anchors
+│   ├── T18.2 Require N >= 2 for render
+│   ├── T18.3 Convert every visible anchor
+│   ├── T18.4 connect consecutive points
+│   ├── T18.5 render Canvas polygon/line representation
+│   ├── T18.6 stroke = #2962FF
+│   ├── T18.7 width = 2
+│   ├── T18.8 fill = none
+│   ├── T18.9 add point
+│   ├── T18.10 remove point
+│   ├── T18.11 move point
+│   └── T18.12 move entire polyline
+│
+├── T19. TRIANGLE PRIMITIVE
+│   │
+│   ├── T19.1 Store exactly 3 anchors
+│   ├── T19.2 Convert anchors to screen points
+│   ├── T19.3 Render Canvas polygon
+│   ├── T19.4 border = #2962FF
+│   ├── T19.5 width = 2
+│   ├── T19.6 fill = #2962FF
+│   ├── T19.7 fill_opacity = 0.10
+│   └── T19.8 handles = 3 vertices
+│
+├── T20. DRAWING TOOL STATE
+│   │
+│   ├── T20.1 Define active_tool
+│   │   ├── default = SELECT
+│   │   └── supported:
+│   │       ├── NONE
+│   │       ├── SELECT
+│   │       ├── LINE
+│   │       ├── RAY
+│   │       ├── HORIZONTAL_LINE
+│   │       ├── VERTICAL_LINE
+│   │       ├── RECTANGLE
+│   │       ├── CIRCLE
+│   │       ├── ELLIPSE
+│   │       ├── ARC
+│   │       ├── TEXT
+│   │       ├── POLYLINE
+│   │       └── TRIANGLE
+│   │
+│   ├── T20.2 Separate tool from drawing
+│   │   ├── active_tool="LINE" does not create object
+│   │   └── object created only after creation completes
+│   │
+│   └── T20.3 Tool change
+│       ├── cancel incomplete creation
+│       ├── remove preview
+│       └── update interaction state
+│
+├── T21. CREATION STATE MACHINE
+│   │
+│   ├── T21.1 Define states
+│   │   ├── IDLE
+│   │   ├── CREATING
+│   │   ├── COMPLETE
+│   │   └── CANCELLED
+│   │
+│   ├── T21.2 Line creation
+│   │   ├── first click → anchor_1
+│   │   ├── mouse move → preview anchor_2
+│   │   └── second click → anchor_2 + complete
+│   │
+│   ├── T21.3 Rectangle creation
+│   │   ├── first click → corner_1
+│   │   ├── move → preview corner_2
+│   │   └── second click → corner_2 + complete
+│   │
+│   ├── T21.4 Circle creation
+│   │   ├── first click → center
+│   │   ├── move → radius preview
+│   │   └── second click → radius reference + complete
+│   │
+│   ├── T21.5 Text creation
+│   │   ├── click → anchor
+│   │   ├── open text editor
+│   │   ├── accept text → create
+│   │   └── cancel → discard
+│   │
+│   └── T21.6 Escape handling
+│       ├── CREATING → CANCELLED
+│       ├── remove preview
+│       ├── discard temporary anchors
+│       └── return to active tool state
+│
+├── T22. DRAWING PREVIEW
+│   │
+│   ├── T22.1 Preview is temporary
+│   │   ├── not in DrawingStore
+│   │   ├── not serialized
+│   │   ├── not selectable
+│   │   └── not part of persistent drawing order
+│   │
+│   ├── T22.2 Preview style
+│   │   ├── color = #2962FF
+│   │   ├── opacity = 0.70
+│   │   └── width = 1
+│   │
+│   ├── T22.3 Update preview
+│   │   ├── mouse position → chart coordinates
+│   │   ├── calculate temporary geometry
+│   │   └── update temporary Canvas resources
+│   │
+│   └── T22.4 Completion
+│       ├── create persistent DrawingObject
+│       ├── assign stable drawing_id
+│       ├── add to DrawingStore
+│       └── release preview resources
+│
+├── T23. DRAWING HIT TEST ENGINE
+│   │
+│   ├── T23.1 Define
+│   │   └── DRAWING_HIT_TOLERANCE = 6 px
+│   │
+│   ├── T23.2 Candidate filtering
+│   │   ├── ignore visible=false
+│   │   ├── ignore preview objects
+│   │   └── optionally ignore locked objects only when editing
+│   │
+│   ├── T23.3 Topmost-first search
+│   │   ├── z_order descending
+│   │   └── creation_order descending
+│   │
+│   ├── T23.4 Line hit test
+│   │   ├── calculate point-to-segment distance
+│   │   └── hit if distance <= 6 px
+│   │
+│   ├── T23.5 Rectangle hit test
+│   │   ├── calculate border distance
+│   │   ├── hit border if <= 6 px
+│   │   └── optional interior hit
+│   │
+│   ├── T23.6 Circle hit test
+│   │   ├── calculate center distance
+│   │   ├── compare with radius
+│   │   └── apply 6 px tolerance
+│   │
+│   ├── T23.7 Ellipse hit test
+│   │   ├── calculate normalized ellipse equation
+│   │   └── apply tolerance
+│   │
+│   ├── T23.8 Text hit test
+│   │   └── bounding-box containment
+│   │
+│   └── T23.9 Return HitResult
+│       ├── hit = true/false
+│       ├── drawing_id
+│       ├── distance
+│       └── optional anchor_id
+│
+├── T24. DRAWING SELECTION
+│   │
+│   ├── T24.1 Select by mouse
+│   │   ├── hit-test visible drawings
+│   │   ├── choose highest z_order hit
+│   │   ├── clear previous selection unless multi-select exists
+│   │   └── selected=true
+│   │
+│   ├── T24.2 Selection overlay
+│   │   ├── selected stroke = #2962FF
+│   │   ├── selected width = 2
+│   │   ├── render handles
+│   │   └── keep overlay above drawings
+│   │
+│   ├── T24.3 Deselect
+│   │   ├── selected=false
+│   │   ├── remove handles
+│   │   └── invalidate selection overlay
+│   │
+│   └── T24.4 Selection identity
+│       ├── selection stores drawing_id
+│       ├── never stores Canvas ID
+│       └── drawing lookup resolves selected object
+│
+├── T25. DRAWING HANDLES
+│   │
+│   ├── T25.1 Handle defaults
+│   │   ├── radius = 4 px
+│   │   ├── fill = #FFFFFF
+│   │   ├── border = #2962FF
+│   │   └── border_width = 1
+│   │
+│   ├── T25.2 Line handles
+│   │   ├── endpoint_1
+│   │   └── endpoint_2
+│   │
+│   ├── T25.3 Rectangle handles
+│   │   ├── top-left
+│   │   ├── top-right
+│   │   ├── bottom-left
+│   │   └── bottom-right
+│   │
+│   ├── T25.4 Circle handles
+│   │   ├── center
+│   │   └── radius
+│   │
+│   ├── T25.5 Arc handles
+│   │   ├── start
+│   │   ├── end
+│   │   └── control
+│   │
+│   ├── T25.6 Polyline handles
+│   │   └── every vertex
+│   │
+│   └── T25.7 Handle hit test
+│       ├── compare mouse position to handle center
+│       ├── use radius = 4 px
+│       └── allow practical hit area around handle
+│
+├── T26. MOVE ENTIRE DRAWING
+│   │
+│   ├── T26.1 Capture drag start
+│   │   ├── mouse_start_x
+│   │   ├── mouse_start_y
+│   │   ├── logical_start
+│   │   └── price_start
+│   │
+│   ├── T26.2 Calculate pixel delta
+│   │   ├── dx_pixels = mouse_x - start_x
+│   │   └── dy_pixels = mouse_y - start_y
+│   │
+│   ├── T26.3 Convert horizontal delta
+│   │   └── logical_delta = pixel_delta_to_logical_delta(dx_pixels)
+│   │
+│   ├── T26.4 Convert vertical delta
+│   │   └── price_delta = pixel_delta_to_price_delta(dy_pixels)
+│   │
+│   ├── T26.5 Apply movement
+│   │   ├── anchor.logical_index += logical_delta
+│   │   └── anchor.price += price_delta
+│   │
+│   ├── T26.6 Apply to every anchor
+│   │   └── preserve relative geometry
+│   │
+│   └── T26.7 Locked condition
+│       ├── locked=true → reject movement
+│       └── locked=false → allow movement
+│
+├── T27. MOVE SINGLE ANCHOR
+│   │
+│   ├── T27.1 Identify selected handle
+│   ├── T27.2 Receive current mouse position
+│   ├── T27.3 Convert mouse_x → float logical_index
+│   ├── T27.4 Convert mouse_y → price
+│   ├── T27.5 Update only selected anchor
+│   ├── T27.6 Mark geometry dirty
+│   ├── T27.7 Invalidate drawing
+│   └── T27.8 Schedule existing render scheduler
+│
+├── T28. DRAWING INVALIDATION
+│   │
+│   ├── T28.1 Define flags
+│   │   ├── DRAWINGS_DATA_DIRTY
+│   │   ├── DRAWINGS_GEOMETRY_DIRTY
+│   │   ├── DRAWINGS_STYLE_DIRTY
+│   │   ├── DRAWINGS_SELECTION_DIRTY
+│   │   └── DRAWINGS_OVERLAY_DIRTY
+│   │
+│   ├── T28.2 Data change
+│   │   └── mark DRAWINGS_DATA_DIRTY where drawing depends on data
+│   │
+│   ├── T28.3 Pan
+│   │   └── mark DRAWINGS_GEOMETRY_DIRTY
+│   │
+│   ├── T28.4 Zoom
+│   │   └── mark DRAWINGS_GEOMETRY_DIRTY
+│   │
+│   ├── T28.5 Price scale change
+│   │   └── mark DRAWINGS_GEOMETRY_DIRTY
+│   │
+│   ├── T28.6 Resize
+│   │   └── mark DRAWINGS_GEOMETRY_DIRTY
+│   │
+│   ├── T28.7 Anchor movement
+│   │   └── mark DRAWINGS_GEOMETRY_DIRTY
+│   │
+│   ├── T28.8 Style change
+│   │   └── mark DRAWINGS_STYLE_DIRTY
+│   │
+│   └── T28.9 Selection change
+│       └── mark DRAWINGS_SELECTION_DIRTY
+│
+├── T29. RENDER SCHEDULER INTEGRATION
+│   │
+│   ├── T29.1 Reuse existing RenderScheduler
+│   │   └── do not create second render loop
+│   │
+│   ├── T29.2 Drawing event
+│   │   ├── update model
+│   │   ├── set dirty flags
+│   │   └── request existing render frame
+│   │
+│   ├── T29.3 Render order
+│   │   ├── data
+│   │   ├── time scale
+│   │   ├── price scale
+│   │   ├── grid
+│   │   ├── candles
+│   │   ├── indicators
+│   │   ├── drawings
+│   │   ├── crosshair
+│   │   └── drawing selection/handles
+│   │
+│   └── T29.4 Coalescing
+│       ├── multiple drawing events before frame → one render
+│       └── never render complete drawing layer once per mouse event
+│
+├── T30. DELETE DRAWING
+│   │
+│   ├── T30.1 Trigger
+│   │   ├── Delete
+│   │   └── Backspace
+│   │
+│   ├── T30.2 Validate selected drawing
+│   ├── T30.3 remove from DrawingStore
+│   ├── T30.4 release Canvas resources
+│   ├── T30.5 remove selection state
+│   ├── T30.6 mark drawing layer dirty
+│   └── T30.7 schedule render
+│
+├── T31. DUPLICATE DRAWING
+│   │
+│   ├── T31.1 Deep-copy source drawing
+│   ├── T31.2 Generate new drawing_id
+│   ├── T31.3 Preserve drawing_type
+│   ├── T31.4 Preserve style
+│   ├── T31.5 Preserve anchor geometry
+│   ├── T31.6 Apply logical offset
+│   │   └── +1 logical bar
+│   ├── T31.7 Apply price offset
+│   │   └── +0.5% of current visible price range
+│   ├── T31.8 reset selected state
+│   ├── T31.9 add new drawing
+│   └── T31.10 render duplicate
+│
+├── T32. DRAWING SERIALIZATION
+│   │
+│   ├── T32.1 Serialize identity
+│   │   ├── drawing_id
+│   │   ├── drawing_type
+│   │   ├── optional drawing_name
+│   │   └── optional semantic_id
+│   │
+│   ├── T32.2 Serialize ordering
+│   │   ├── creation_order
+│   │   └── z_order
+│   │
+│   ├── T32.3 Serialize state
+│   │   ├── visible
+│   │   ├── locked
+│   │   └── selected only if persistence requires it
+│   │
+│   ├── T32.4 Serialize anchors
+│   │   ├── logical_index
+│   │   └── price
+│   │
+│   ├── T32.5 Serialize style
+│   │   ├── stroke_color
+│   │   ├── stroke_width
+│   │   ├── stroke_style
+│   │   ├── stroke_opacity
+│   │   ├── fill_enabled
+│   │   ├── fill_color
+│   │   └── fill_opacity
+│   │
+│   ├── T32.6 Explicitly exclude
+│   │   ├── canvas_id
+│   │   ├── x_pixel
+│   │   ├── y_pixel
+│   │   ├── screen_width
+│   │   └── screen_height
+│   │
+│   └── T32.7 Deserialize
+│       ├── validate schema
+│       ├── resolve drawing type
+│       ├── restore identity
+│       ├── restore anchors
+│       ├── restore style
+│       ├── insert into DrawingStore
+│       └── create Canvas resources during rendering
+│
+├── T33. DRAWING SEARCH / ID INDEX
+│   │
+│   ├── T33.1 Exact ID index
+│   │   └── drawing_id → drawing
+│   │
+│   ├── T33.2 Type index
+│   │   └── drawing_type → drawing IDs
+│   │
+│   ├── T33.3 Semantic/name index
+│   │   ├── semantic_id → drawing IDs
+│   │   └── drawing_name → drawing IDs
+│   │
+│   ├── T33.4 Prefix search
+│   │   ├── query = "custom_indicator"
+│   │   └── return matching semantic IDs/names
+│   │
+│   ├── T33.5 Wildcard search
+│   │   ├── query = "custom_indicator*"
+│   │   ├── "*" matches zero or more characters
+│   │   └── return all matching drawings
+│   │
+│   ├── T33.6 Example identifier
+│   │   ├── drawing_type = subplot_shape_numeric
+│   │   ├── semantic_id = RSI_upperline_1
+│   │   └── searchable path = subplot_shape_numeric(RSI_upperline_1)
+│   │
+│   └── T33.7 Index maintenance
+│       ├── add → update indexes
+│       ├── rename → update name indexes
+│       ├── type immutable → no type index migration
+│       ├── delete → remove from indexes
+│       └── drawing_id never changes
+│
+├── T34. VISIBILITY / LOCK MANAGEMENT
+│   │
+│   ├── T34.1 Hide
+│   │   ├── visible=false
+│   │   ├── keep DrawingStore object
+│   │   ├── hide Canvas resources
+│   │   └── exclude from hit testing
+│   │
+│   ├── T34.2 Show
+│   │   ├── visible=true
+│   │   ├── mark geometry dirty
+│   │   └── render
+│   │
+│   ├── T34.3 Lock
+│   │   ├── locked=true
+│   │   ├── prevent body movement
+│   │   └── prevent anchor movement
+│   │
+│   └── T34.4 Unlock
+│       └── locked=false
+│
+├── T35. TIME-BASED COORDINATE EXTENSION
+│   │
+│   ├── T35.1 Keep initial authoritative horizontal coordinate
+│   │   └── logical_index: float
+│   │
+│   ├── T35.2 Reserve future coordinate_mode
+│   │   ├── LOGICAL_INDEX
+│   │   └── TIMESTAMP
+│   │
+│   ├── T35.3 Future ChartPoint structure
+│   │   ├── coordinate_mode
+│   │   ├── logical_index
+│   │   ├── timestamp
+│   │   └── price
+│   │
+│   └── T35.4 Do not implement timestamp migration yet
+│       └── only preserve model extension point
+│
+├── T36. SELECT TOOL INTERACTION
+│   │
+│   ├── T36.1 Default
+│   │   └── active_tool = SELECT
+│   │
+│   ├── T36.2 Click empty area
+│   │   └── deselect drawings
+│   │
+│   ├── T36.3 Click drawing
+│   │   └── select topmost matching drawing
+│   │
+│   ├── T36.4 Drag selected body
+│   │   └── move entire drawing
+│   │
+│   └── T36.5 Drag selected handle
+│       └── move only corresponding anchor
+│
+├── T37. KEYBOARD MODIFIERS
+│   │
+│   ├── T37.1 Escape
+│   │   ├── cancel active creation
+│   │   └── remove preview
+│   │
+│   ├── T37.2 Delete
+│   │   └── delete selected drawing
+│   │
+│   ├── T37.3 Backspace
+│   │   └── delete selected drawing
+│   │
+│   ├── T37.4 Shift + Rectangle
+│   │   └── force screen-space square
+│   │
+│   ├── T37.5 Shift + Ellipse
+│   │   └── force screen-space circle
+│   │
+│   └── T37.6 Shift + Line
+│       └── constrain line angle
+│
+├── T38. DRAWING PERFORMANCE
+│   │
+│   ├── T38.1 Calculate once
+│   │   ├── drawing identity
+│   │   ├── persistent anchor state
+│   │   ├── style state
+│   │   └── registry definition
+│   │
+│   ├── T38.2 Recalculate on data/state change
+│   │   ├── anchor modification
+│   │   ├── style modification
+│   │   ├── visibility modification
+│   │   └── z-order modification
+│   │
+│   ├── T38.3 Recalculate on viewport change
+│   │   ├── pan
+│   │   ├── zoom
+│   │   ├── resize
+│   │   └── price-scale change
+│   │
+│   ├── T38.4 Mouse hot path
+│   │   ├── convert mouse coordinates
+│   │   ├── update affected drawing
+│   │   ├── update preview/selection
+│   │   └── schedule one coalesced render
+│   │
+│   ├── T38.5 Avoid
+│   │   ├── recreating Canvas items
+│   │   ├── serializing every mouse event
+│   │   ├── rebuilding all indexes every frame
+│   │   ├── processing unrelated drawings during handle drag
+│   │   └── full dataset traversal for drawings
+│   │
+│   └── T38.6 Cache
+│       ├── drawing geometry
+│       ├── Canvas resource IDs
+│       ├── searchable indexes
+│       └── style-derived Canvas configuration
+│
+├── T39. DRAWING/SERIES SEPARATION
+│   │
+│   ├── T39.1 Series
+│   │   ├── candles
+│   │   ├── volume
+│   │   ├── SMA
+│   │   ├── EMA
+│   │   ├── RSI
+│   │   ├── MACD
+│   │   └── Bollinger Bands
+│   │
+│   ├── T39.2 Drawings
+│   │   ├── line
+│   │   ├── ray
+│   │   ├── horizontal_line
+│   │   ├── vertical_line
+│   │   ├── rectangle
+│   │   ├── circle
+│   │   ├── ellipse
+│   │   ├── arc
+│   │   ├── text
+│   │   ├── triangle
+│   │   └── polyline
+│   │
+│   ├── T39.3 Series authority
+│   │   └── derived from market/calculated data
+│   │
+│   └── T39.4 Drawing authority
+│       └── user-authored persistent state
+│
+├── T40. ADVANCED DRAWING EXTENSIONS
+│   │
+│   ├── T40.1 Extended line
+│   │   ├── extend_left = false
+│   │   └── extend_right = false
+│   │
+│   ├── T40.2 Arrow endpoint
+│   │   ├── NONE
+│   │   ├── ARROW
+│   │   └── CIRCLE
+│   │
+│   ├── T40.3 Midpoint handle
+│   │   └── optional
+│   │
+│   ├── T40.4 Center line
+│   │   └── disabled by default
+│   │
+│   ├── T40.5 Duplicate
+│   │   ├── new drawing_id
+│   │   ├── +1 logical bar
+│   │   └── +0.5% visible price range
+│   │
+│   ├── T40.6 Copy/paste
+│   │   ├── serialize selected drawing
+│   │   ├── create new drawing_id on paste
+│   │   └── restore geometry/style
+│   │
+│   └── T40.7 Templates
+│       ├── save style configuration
+│       ├── save primitive configuration
+│       └── apply template to new drawing
+│
+├── T41. PROFESSIONAL DRAWING MANAGEMENT
+│   │
+│   ├── T41.1 Drawing groups
+│   │   ├── group_id
+│   │   ├── member drawing_ids
+│   │   └── group visibility/lock state
+│   │
+│   ├── T41.2 Drawing object tree
+│   │   ├── list drawing_name
+│   │   ├── list drawing_type
+│   │   ├── list drawing_id
+│   │   ├── list semantic_id
+│   │   ├── visibility control
+│   │   └── lock control
+│   │
+│   ├── T41.3 Z-order controls
+│   │   ├── bring forward
+│   │   ├── send backward
+│   │   ├── bring to front
+│   │   └── send to back
+│   │
+│   ├── T41.4 Global lock
+│   │   └── prevent editing of all drawings
+│   │
+│   ├── T41.5 Favorites
+│   │   └── mark drawing types as preferred tools
+│   │
+│   ├── T41.6 Persistent storage
+│   │   └── save DrawingStore serialization
+│   │
+│   └── T41.7 Import/export
+│       ├── validate imported drawing types
+│       ├── validate anchors
+│       ├── regenerate conflicting IDs where required
+│       └── restore drawing state
+│
+└── T42. ACCEPTANCE TEST ENGINE
+    │
+    ├── T42.1 Line pan test
+    │   ├── create line
+    │   ├── pan chart
+    │   └── verify line remains attached to original logical/price coordinates
+    │
+    ├── T42.2 Line zoom test
+    │   ├── create line
+    │   ├── zoom around cursor
+    │   └── verify anchors remain unchanged
+    │
+    ├── T42.3 Resize test
+    │   ├── create drawing
+    │   ├── resize chart
+    │   └── verify chart-space anchors remain unchanged
+    │
+    ├── T42.4 Anchor editing test
+    │   ├── select line
+    │   ├── drag endpoint
+    │   └── verify only one anchor changed
+    │
+    ├── T42.5 Body movement test
+    │   ├── select line
+    │   ├── drag body
+    │   └── verify all anchors changed by identical logical/price delta
+    │
+    ├── T42.6 Rectangle handle test
+    │   ├── select rectangle
+    │   ├── verify four handles
+    │   └── move one handle
+    │
+    ├── T42.7 Visibility test
+    │   ├── hide rectangle
+    │   ├── verify Canvas disappears
+    │   ├── verify DrawingStore still contains object
+    │   └── verify serialization still contains object
+    │
+    ├── T42.8 Lock test
+    │   ├── lock rectangle
+    │   ├── attempt body move
+    │   ├── attempt handle move
+    │   └── verify geometry unchanged
+    │
+    ├── T42.9 Serialization test
+    │   ├── create drawings
+    │   ├── serialize
+    │   ├── clear
+    │   ├── deserialize
+    │   └── compare chart-space state
+    │
+    ├── T42.10 Zoom-density test
+    │   ├── set bar spacing = 6
+    │   ├── create drawing
+    │   ├── set bar spacing = 1
+    │   └── verify drawing remains attached
+    │
+    ├── T42.11 Append-data test
+    │   ├── create drawing
+    │   ├── append candles
+    │   └── verify existing drawing coordinates do not shift
+    │
+    ├── T42.12 Price-scale test
+    │   ├── create drawing
+    │   ├── change visible price range
+    │   └── verify price coordinate remains correct
+    │
+    ├── T42.13 Z-order selection test
+    │   ├── create overlapping drawings
+    │   ├── assign different z_order
+    │   ├── click overlap
+    │   └── verify highest z_order is selected
+    │
+    ├── T42.14 Delete/resource test
+    │   ├── select drawing
+    │   ├── delete
+    │   ├── verify DrawingStore removal
+    │   ├── verify selection removal
+    │   └── verify Canvas resource release/recycle
+    │
+    ├── T42.15 Stable-ID test
+    │   ├── create drawing_id
+    │   ├── redraw
+    │   ├── select
+    │   ├── move
+    │   ├── serialize
+    │   ├── deserialize
+    │   └── verify drawing_id unchanged
+    │
+    ├── T42.16 Search test
+    │   ├── create semantic_id = RSI_upperline_1
+    │   ├── searchable identifier = subplot_shape_numeric(RSI_upperline_1)
+    │   ├── exact search → matching drawing
+    │   ├── type search → matching drawing
+    │   ├── prefix search custom_indicator → matching drawings
+    │   └── wildcard search custom_indicator* → all matching drawings
+    │
+    └── T42.17 Canvas-authority test
+        ├── change Canvas item ID
+        ├── retain same drawing_id
+        ├── verify selection still resolves
+        ├── verify serialization still resolves
+        └── verify search still resolves

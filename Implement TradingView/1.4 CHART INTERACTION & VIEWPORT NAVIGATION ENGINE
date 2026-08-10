@@ -1,0 +1,1128 @@
+TASK 17
+CHART INTERACTION & VIEWPORT NAVIGATION ENGINE
+│
+├── T17.1 VIEWPORT STATE MODEL
+│   │
+│   ├── T17.1.1 Define horizontal viewport state
+│   │   ├── Store visible_start as float logical index.
+│   │   ├── Store visible_end as float logical index.
+│   │   ├── Store bar_spacing = 6.0 px.
+│   │   ├── Store min_bar_spacing = 0.5 px.
+│   │   ├── Store max_bar_spacing = 0.0.
+│   │   ├── Interpret max_bar_spacing = 0.0 as unlimited.
+│   │   ├── Store right_offset = 0.0 bars.
+│   │   ├── Store follow_latest = true initially when the viewport is initialized at the latest data edge.
+│   │   ├── Store fix_left_edge = false.
+│   │   ├── Store fix_right_edge = false.
+│   │   └── Do not store pixel coordinates as authoritative viewport state.
+│   │
+│   ├── T17.1.2 Define vertical viewport state
+│   │   ├── Store price range separately for every pane.
+│   │   ├── Store price_range_min.
+│   │   ├── Store price_range_max.
+│   │   ├── Store autoscale_enabled per pane.
+│   │   ├── Store manual_scale state per pane.
+│   │   └── Never use one pane's Y range for another pane.
+│   │
+│   ├── T17.1.3 Define navigation constraints
+│   │   ├── Minimum valid logical range must have visible_end > visible_start.
+│   │   ├── Do not allow bar_spacing < 0.5.
+│   │   ├── If max_bar_spacing == 0.0, do not apply an upper spacing limit.
+│   │   ├── If max_bar_spacing > 0.0, clamp spacing to max_bar_spacing.
+│   │   ├── Respect fix_left_edge when calculating horizontal movement.
+│   │   └── Respect fix_right_edge when calculating horizontal movement.
+│   │
+│   ├── T17.1.4 Define viewport queries
+│   │   ├── Return visible_start.
+│   │   ├── Return visible_end.
+│   │   ├── Return visible logical range.
+│   │   ├── Return bar_spacing.
+│   │   ├── Return right_offset.
+│   │   ├── Return follow_latest.
+│   │   └── Return pane-specific price ranges.
+│   │
+│   └── T17.1.5 Test viewport state
+│       ├── Initialize with bar_spacing = 6.0.
+│       ├── Verify min_bar_spacing = 0.5.
+│       ├── Verify max_bar_spacing = 0.0 means unlimited.
+│       ├── Verify right_offset = 0.0.
+│       ├── Verify horizontal values remain fractional.
+│       ├── Verify each pane has independent vertical state.
+│       └── Verify no pixel position becomes authoritative state.
+│
+├── T17.2 VIEWPORT CONTROLLER
+│   │
+│   ├── T17.2.1 Create viewport mutation interface
+│   │   ├── Implement horizontal pan operation.
+│   │   ├── Implement horizontal zoom operation.
+│   │   ├── Implement cursor-centered zoom operation.
+│   │   ├── Implement pinch-centered zoom operation.
+│   │   ├── Implement price-scale mutation operation.
+│   │   ├── Implement time-axis mutation operation.
+│   │   ├── Implement latest-bar following.
+│   │   └── Implement constraint enforcement.
+│   │
+│   ├── T17.2.2 Separate viewport mutation from rendering
+│   │   ├── Mutation changes ViewportState.
+│   │   ├── Mutation does not call Canvas directly.
+│   │   ├── Mutation does not rebuild series.
+│   │   ├── Mutation does not modify candle data.
+│   │   └── Mutation requests invalidation after successful state change.
+│   │
+│   ├── T17.2.3 Preserve existing coordinate system
+│   │   ├── Use existing TimeScale for X conversion.
+│   │   ├── Use existing PriceScale for Y conversion.
+│   │   ├── Use existing fractional viewport origin.
+│   │   ├── Do not introduce a second logical-index coordinate system.
+│   │   └── Do not introduce a second pane coordinate system.
+│   │
+│   └── T17.2.4 Test viewport controller
+│       ├── Pan changes visible logical range.
+│       ├── Zoom changes bar spacing.
+│       ├── Price scaling changes only the selected pane.
+│       ├── Viewport mutations do not modify OHLCV.
+│       ├── Viewport mutations do not modify drawing anchors.
+│       └── Viewport mutations trigger invalidation only after actual changes.
+│
+├── T17.3 INPUT EVENT NORMALIZATION
+│   │
+│   ├── T17.3.1 Define internal pointer event
+│   │   ├── Store event type.
+│   │   ├── Store screen x.
+│   │   ├── Store screen y.
+│   │   ├── Store previous x.
+│   │   ├── Store previous y.
+│   │   ├── Store button.
+│   │   ├── Store modifier keys.
+│   │   ├── Store timestamp.
+│   │   └── Store pointer identifier where available.
+│   │
+│   ├── T17.3.2 Define internal wheel event
+│   │   ├── Store delta_x.
+│   │   ├── Store delta_y.
+│   │   ├── Store pointer x.
+│   │   ├── Store pointer y.
+│   │   ├── Store modifier keys.
+│   │   └── Store timestamp.
+│   │
+│   ├── T17.3.3 Define internal touch event
+│   │   ├── Store active touch identifiers.
+│   │   ├── Store touch positions.
+│   │   ├── Store touch count.
+│   │   ├── Store center position.
+│   │   ├── Store previous center position.
+│   │   ├── Store pinch distance.
+│   │   └── Store previous pinch distance.
+│   │
+│   ├── T17.3.4 Normalize pointer movement
+│   │   ├── Calculate dx = current_x - previous_x.
+│   │   ├── Calculate dy = current_y - previous_y.
+│   │   ├── Preserve fractional values.
+│   │   └── Do not round movement before viewport conversion.
+│   │
+│   ├── T17.3.5 Normalize pointer button
+│   │   ├── Map primary button to PRIMARY.
+│   │   ├── Map secondary button to SECONDARY.
+│   │   └── Ignore unsupported buttons unless explicitly configured.
+│   │
+│   └── T17.3.6 Test event normalization
+│       ├── Pointer movement produces correct dx/dy.
+│       ├── Wheel coordinates are preserved.
+│       ├── Modifier state is preserved.
+│       ├── Touch center is correctly calculated.
+│       └── Pinch distance is calculated from active touch points.
+│
+├── T17.4 INTERACTION STATE MACHINE
+│   │
+│   ├── T17.4.1 Define states
+│   │   ├── IDLE
+│   │   ├── HOVER
+│   │   ├── CROSSHAIR_ACTIVE
+│   │   ├── PRESS_PENDING
+│   │   ├── DRAGGING_CHART
+│   │   ├── DRAGGING_PRICE_SCALE
+│   │   ├── DRAGGING_TIME_SCALE
+│   │   ├── ZOOMING_TIME
+│   │   ├── ZOOMING_PRICE
+│   │   ├── DRAGGING_SHAPE
+│   │   ├── RESIZING_SHAPE
+│   │   └── KINETIC_SCROLL
+│   │
+│   ├── T17.4.2 Define state ownership
+│   │   ├── IDLE owns no active pointer gesture.
+│   │   ├── HOVER owns pointer movement without navigation.
+│   │   ├── PRESS_PENDING owns pointer-down before drag threshold.
+│   │   ├── DRAGGING_SHAPE owns shape body movement.
+│   │   ├── RESIZING_SHAPE owns shape handle movement.
+│   │   ├── DRAGGING_CHART owns horizontal chart navigation.
+│   │   ├── DRAGGING_PRICE_SCALE owns vertical price-scale interaction.
+│   │   ├── DRAGGING_TIME_SCALE owns time-axis interaction.
+│   │   ├── ZOOMING_TIME owns horizontal zoom gesture.
+│   │   ├── ZOOMING_PRICE owns vertical scale gesture.
+│   │   └── KINETIC_SCROLL owns inertial navigation.
+│   │
+│   ├── T17.4.3 Define state transitions
+│   │   ├── IDLE + pointer_move → HOVER.
+│   │   ├── HOVER + pointer_move → CROSSHAIR_ACTIVE when pointer is inside chart and crosshair is enabled.
+│   │   ├── HOVER + primary pointer_down → PRESS_PENDING.
+│   │   ├── PRESS_PENDING + movement below threshold → PRESS_PENDING.
+│   │   ├── PRESS_PENDING + selected-shape hit → DRAGGING_SHAPE.
+│   │   ├── PRESS_PENDING + shape-handle hit → RESIZING_SHAPE.
+│   │   ├── PRESS_PENDING + price-axis hit → DRAGGING_PRICE_SCALE.
+│   │   ├── PRESS_PENDING + time-axis hit → DRAGGING_TIME_SCALE.
+│   │   ├── PRESS_PENDING + empty pane + movement threshold → DRAGGING_CHART.
+│   │   ├── DRAGGING_CHART + pointer_move → remain DRAGGING_CHART.
+│   │   ├── DRAGGING_SHAPE + pointer_move → remain DRAGGING_SHAPE.
+│   │   ├── RESIZING_SHAPE + pointer_move → remain RESIZING_SHAPE.
+│   │   ├── any active drag + pointer_up → HOVER or CROSSHAIR_ACTIVE.
+│   │   ├── any creation/navigation state + pointer_leave → preserve active state where required by current gesture.
+│   │   └── touch gesture completion → IDLE/HOVER or KINETIC_SCROLL.
+│   │
+│   └── T17.4.4 Test state transitions
+│       ├── Verify every valid transition.
+│       ├── Verify invalid transitions are ignored.
+│       ├── Verify shape interaction prevents chart dragging.
+│       ├── Verify axis interaction prevents chart dragging.
+│       ├── Verify pointer release exits drag state.
+│       └── Verify Escape cancels applicable pending/creation interaction.
+│
+├── T17.5 PRESS-PENDING / DRAG THRESHOLD
+│   │
+│   ├── T17.5.1 Capture press origin
+│   │   ├── Store press_x.
+│   │   ├── Store press_y.
+│   │   ├── Store press logical index.
+│   │   ├── Store press pane.
+│   │   └── Store initial hit-test result.
+│   │
+│   ├── T17.5.2 Calculate movement distance
+│   │   ├── Calculate dx = current_x - press_x.
+│   │   ├── Calculate dy = current_y - press_y.
+│   │   └── Compare movement against configured drag threshold.
+│   │
+│   ├── T17.5.3 Prevent accidental navigation
+│   │   ├── Keep state PRESS_PENDING while movement remains below threshold.
+│   │   ├── Do not pan chart below threshold.
+│   │   └── Do not start kinetic scrolling below threshold.
+│   │
+│   └── T17.5.4 Test press threshold
+│       ├── Small pointer movement does not pan.
+│       ├── Movement beyond threshold starts correct owner.
+│       └── Shape/handle hit remains authoritative during threshold processing.
+│
+├── T17.6 EVENT ARBITRATION
+│   │
+│   ├── T17.6.1 Route pointer_down through hit testing
+│   │   ├── Test interaction handles first.
+│   │   ├── Test selected drawing body second.
+│   │   ├── Test other drawings third.
+│   │   ├── Test price axis.
+│   │   ├── Test time axis.
+│   │   ├── Test series/bar where supported.
+│   │   └── Fall back to pane/chart navigation.
+│   │
+│   ├── T17.6.2 Handle shape priority
+│   │   ├── If handle is hit, enter RESIZING_SHAPE.
+│   │   ├── If selected shape body is hit, enter DRAGGING_SHAPE.
+│   │   ├── If another shape is hit, select it according to existing selection logic.
+│   │   └── Do not enter DRAGGING_CHART when shape interaction owns the event.
+│   │
+│   ├── T17.6.3 Handle axis priority
+│   │   ├── If price-axis region is hit, route to price-scale interaction.
+│   │   ├── If time-axis region is hit, route to time-scale interaction.
+│   │   └── Do not route axis events to chart panning.
+│   │
+│   ├── T17.6.4 Handle empty-pane priority
+│   │   ├── If no interactive target is hit, allow chart navigation.
+│   │   └── Require pressed-mouse scrolling to be enabled.
+│   │
+│   └── T17.6.5 Test arbitration
+│       ├── Handle beats shape body.
+│       ├── Shape beats chart.
+│       ├── Axis beats chart.
+│       ├── Chart owns empty-pane drag.
+│       └── Crosshair never steals pointer ownership.
+│
+├── T17.7 CROSSHAIR INTERACTION INTEGRATION
+│   │
+│   ├── T17.7.1 Define crosshair eligibility
+│   │   ├── Crosshair is eligible during normal hover.
+│   │   ├── Crosshair is hidden during DRAGGING_CHART.
+│   │   ├── Crosshair is hidden during DRAGGING_SHAPE.
+│   │   ├── Crosshair is hidden during RESIZING_SHAPE.
+│   │   ├── Crosshair is hidden during price-scale dragging where appropriate.
+│   │   └── Crosshair state is controlled by interaction state, not permanently disabled.
+│   │
+│   ├── T17.7.2 Activate crosshair on hover
+│   │   ├── Receive normalized pointer position.
+│   │   ├── Determine active pane.
+│   │   ├── Pass pointer coordinates to existing CrosshairEngine.
+│   │   ├── Preserve existing MAGNET behaviour.
+│   │   └── Request crosshair-layer invalidation.
+│   │
+│   ├── T17.7.3 Hide crosshair during chart drag
+│   │   ├── Enter DRAGGING_CHART.
+│   │   ├── Set crosshair interaction visibility to hidden.
+│   │   ├── Do not destroy crosshair state.
+│   │   └── Do not recalculate crosshair geometry during drag unless required by architecture.
+│   │
+│   ├── T17.7.4 Restore crosshair after drag
+│   │   ├── Exit DRAGGING_CHART.
+│   │   ├── Set crosshair eligible.
+│   │   ├── Do not immediately force stale crosshair coordinates if pointer moved outside chart.
+│   │   └── On next valid pointer movement, resolve crosshair normally.
+│   │
+│   └── T17.7.5 Test crosshair interaction
+│       ├── Hover shows crosshair.
+│       ├── Chart drag hides crosshair.
+│       ├── Shape drag does not allow crosshair to steal ownership.
+│       ├── Release restores eligibility.
+│       └── Moving after release restores normal crosshair behaviour.
+│
+├── T17.8 HORIZONTAL CHART PANNING
+│   │
+│   ├── T17.8.1 Start chart pan
+│   │   ├── Require pressed_mouse_move = true.
+│   │   ├── Require primary pointer button.
+│   │   ├── Require empty chart/pane area after arbitration.
+│   │   ├── Transition to PRESS_PENDING.
+│   │   └── Transition to DRAGGING_CHART after movement threshold.
+│   │
+│   ├── T17.8.2 Convert pointer movement to logical movement
+│   │   ├── Obtain dx_pixels.
+│   │   ├── Obtain current bar_spacing.
+│   │   ├── Calculate logical_delta = dx_pixels / bar_spacing.
+│   │   ├── Preserve fractional logical_delta.
+│   │   └── Apply sign so chart content follows pointer direction.
+│   │
+│   ├── T17.8.3 Update visible range
+│   │   ├── Add/subtract logical_delta from visible_start and visible_end according to existing TimeScale convention.
+│   │   ├── Preserve visible range width.
+│   │   ├── Preserve fractional viewport origin.
+│   │   └── Recalculate rightOffset relationship through the existing TimeScale.
+│   │
+│   ├── T17.8.4 Apply left boundary
+│   │   ├── If first data index is 0, prevent the viewport from moving beyond configured left boundary unless the existing TimeScale explicitly permits pre-data logical space.
+│   │   ├── If fix_left_edge = true, preserve the left edge according to existing TimeScale semantics.
+│   │   └── Never generate an invalid visible range.
+│   │
+│   ├── T17.8.5 Apply right boundary
+│   │   ├── Respect latest-data boundary.
+│   │   ├── Preserve right_offset.
+│   │   ├── If fix_right_edge = true, preserve right edge according to existing TimeScale semantics.
+│   │   └── Do not force follow_latest unless the viewport is already at the latest edge.
+│   │
+│   ├── T17.8.6 Update follow_latest state
+│   │   ├── Detect movement away from latest edge.
+│   │   ├── Set follow_latest = false when user intentionally scrolls into historical data.
+│   │   └── Allow follow_latest to become true again when the viewport reaches the latest edge.
+│   │
+│   ├── T17.8.7 Invalidate after pan
+│   │   ├── Mark viewport/time-scale geometry dirty.
+│   │   ├── Invalidate grid.
+│   │   ├── Invalidate series geometry dependent on X.
+│   │   ├── Invalidate drawing geometry dependent on X.
+│   │   ├── Invalidate axes.
+│   │   ├── Invalidate crosshair only if eligible.
+│   │   └── Request one coalesced render.
+│   │
+│   └── T17.8.8 Test horizontal pan
+│       ├── Drag right moves content right.
+│       ├── Drag left moves content left.
+│       ├── Fractional movement remains smooth.
+│       ├── Candles, grid, shapes and axes move together.
+│       ├── Multi-pane X positions remain synchronized.
+│       └── Data remains unchanged.
+│
+├── T17.9 MOUSE-WHEEL TIME ZOOM
+│   │
+│   ├── T17.9.1 Enable wheel scaling
+│   │   ├── Default handle_scale.mouse_wheel = true.
+│   │   ├── Ignore wheel scaling when disabled.
+│   │   └── Route wheel to horizontal zoom only when event is interpreted as scaling.
+│   │
+│   ├── T17.9.2 Resolve zoom anchor
+│   │   ├── Obtain pointer x.
+│   │   ├── Convert x to floating logical index using existing TimeScale.
+│   │   ├── Store anchor_logical_index.
+│   │   └── Preserve anchor before changing bar_spacing.
+│   │
+│   ├── T17.9.3 Calculate zoom amount
+│   │   ├── Obtain current bar_spacing.
+│   │   ├── Convert wheel delta to normalized zoom scale.
+│   │   ├── Calculate spacing change proportionally to current spacing.
+│   │   ├── Use approximately 10% of current spacing per normalized zoom unit as the initial behavioural target.
+│   │   ├── Do not use a fixed pixel increment.
+│   │   └── Preserve smooth/fractional spacing.
+│   │
+│   ├── T17.9.4 Apply spacing constraints
+│   │   ├── Clamp new spacing to minimum 0.5 px.
+│   │   ├── If max_bar_spacing > 0.0, clamp to max_bar_spacing.
+│   │   ├── If max_bar_spacing == 0.0, allow unlimited upper spacing.
+│   │   └── Do not permit spacing <= 0.
+│   │
+│   ├── T17.9.5 Restore cursor anchor
+│   │   ├── Calculate new screen coordinate for anchor_logical_index.
+│   │   ├── Compare it with original pointer x.
+│   │   ├── Adjust visible logical range so the same logical index remains under approximately the same pointer x.
+│   │   └── Preserve fractional logical position.
+│   │
+│   ├── T17.9.6 Apply right/edge constraints
+│   │   ├── Respect right_offset.
+│   │   ├── Respect fix_left_edge.
+│   │   ├── Respect fix_right_edge.
+│   │   └── Resolve conflicts using existing TimeScale constraint semantics.
+│   │
+│   ├── T17.9.7 Invalidate zoom-dependent layers
+│   │   ├── TimeScale geometry.
+│   │   ├── Grid.
+│   │   ├── Series.
+│   │   ├── Drawings.
+│   │   ├── Axes.
+│   │   ├── Crosshair if visible.
+│   │   └── Selection handles if visible.
+│   │
+│   └── T17.9.8 Test wheel zoom
+│       ├── Zoom in increases spacing.
+│       ├── Zoom out decreases spacing.
+│       ├── Spacing never drops below 0.5 px.
+│       ├── Cursor logical point remains approximately stationary.
+│       ├── Shapes remain attached to logical/price coordinates.
+│       └── Existing candle rendering remains unchanged.
+│
+├── T17.10 PINCH ZOOM
+│   │
+│   ├── T17.10.1 Enable pinch
+│   │   ├── Default handle_scale.pinch = true.
+│   │   ├── Require backend touch support.
+│   │   └── Ignore pinch when disabled.
+│   │
+│   ├── T17.10.2 Capture initial pinch state
+│   │   ├── Require at least two active touches.
+│   │   ├── Calculate center_x.
+│   │   ├── Calculate center_y.
+│   │   ├── Calculate initial distance.
+│   │   └── Convert center_x to logical anchor index.
+│   │
+│   ├── T17.10.3 Calculate pinch scale
+│   │   ├── Calculate current distance.
+│   │   ├── Calculate scale_ratio = current_distance / initial_distance.
+│   │   ├── Apply ratio to current bar_spacing or configured equivalent.
+│   │   └── Preserve fractional spacing.
+│   │
+│   ├── T17.10.4 Preserve pinch center
+│   │   ├── Convert pinch center to logical index before zoom.
+│   │   ├── Modify spacing.
+│   │   ├── Adjust viewport.
+│   │   └── Keep the same logical index near the pinch center.
+│   │
+│   ├── T17.10.5 Apply spacing limits
+│   │   ├── Minimum = 0.5 px.
+│   │   ├── Maximum = max_bar_spacing when > 0.
+│   │   └── Unlimited when max_bar_spacing = 0.
+│   │
+│   └── T17.10.6 Test pinch
+│       ├── Pinch outward zooms in.
+│       ├── Pinch inward zooms out.
+│       ├── Pinch center remains stable.
+│       └── Pan/zoom state does not corrupt logical coordinates.
+│
+├── T17.11 PRICE-SCALE INTERACTION
+│   │
+│   ├── T17.11.1 Detect price-axis hit
+│   │   ├── Use existing axis bounds.
+│   │   ├── Determine pane associated with the price axis.
+│   │   └── Route pointer event only to that pane's PriceScale.
+│   │
+│   ├── T17.11.2 Start price-scale drag
+│   │   ├── Require axis_pressed_mouse_move.price = true.
+│   │   ├── Capture initial pointer y.
+│   │   ├── Capture initial pane price range.
+│   │   └── Enter DRAGGING_PRICE_SCALE.
+│   │
+│   ├── T17.11.3 Calculate vertical scale movement
+│   │   ├── Calculate dy_pixels.
+│   │   ├── Use existing PriceScale transformation.
+│   │   ├── Convert pointer displacement into scale/range change.
+│   │   ├── Preserve the logical price relationship.
+│   │   └── Do not modify OHLCV values.
+│   │
+│   ├── T17.11.4 Apply pane-specific range
+│   │   ├── Modify only active pane.
+│   │   ├── Leave other pane ranges unchanged.
+│   │   ├── Disable/override autoscale for manual scaling if required by existing PriceScale semantics.
+│   │   └── Mark active pane price geometry dirty.
+│   │
+│   ├── T17.11.5 Invalidate price-dependent layers
+│   │   ├── Active pane series.
+│   │   ├── Active pane drawings.
+│   │   ├── Horizontal grid.
+│   │   ├── Price axis.
+│   │   ├── Crosshair horizontal position.
+│   │   └── Selection handles in the active pane.
+│   │
+│   └── T17.11.6 Test price scaling
+│       ├── Vertical drag changes price scale.
+│       ├── Horizontal logical viewport remains unchanged.
+│       ├── Other panes remain unchanged.
+│       └── Shapes remain attached to their stored prices.
+│
+├── T17.12 TIME-AXIS INTERACTION
+│   │
+│   ├── T17.12.1 Detect time-axis hit
+│   │   ├── Use existing time-axis bounds.
+│   │   └── Route event to TimeScale interaction.
+│   │
+│   ├── T17.12.2 Start time-axis interaction
+│   │   ├── Require axis_pressed_mouse_move.time = true.
+│   │   ├── Capture pointer origin.
+│   │   ├── Capture visible logical range.
+│   │   └── Enter DRAGGING_TIME_SCALE or ZOOMING_TIME according to existing interaction.
+│   │
+│   ├── T17.12.3 Implement horizontal time-axis movement
+│   │   ├── Convert horizontal pointer movement to logical movement.
+│   │   ├── Use logical_delta = dx_pixels / bar_spacing.
+│   │   ├── Preserve fractional movement.
+│   │   └── Apply viewport constraints.
+│   │
+│   ├── T17.12.4 Implement time-axis scaling
+│   │   ├── If axis scaling is configured for drag scaling, use pointer displacement to change bar_spacing.
+│   │   ├── Preserve the appropriate time-axis anchor.
+│   │   └── Clamp spacing to configured limits.
+│   │
+│   └── T17.12.5 Test time-axis interaction
+│       ├── Time-axis interaction does not alter price range.
+│       ├── Pane horizontal ranges remain synchronized.
+│       └── Series/shapes remain time-aligned.
+│
+├── T17.13 AXIS DOUBLE-CLICK RESET
+│   │
+│   ├── T17.13.1 Enable reset
+│   │   ├── Default axis_double_click_reset = true.
+│   │   └── Ignore reset when disabled.
+│   │
+│   ├── T17.13.2 Detect target axis
+│   │   ├── Identify price axis or time axis.
+│   │   ├── Identify associated pane for price axis.
+│   │   └── Do not reset unrelated scales.
+│   │
+│   ├── T17.13.3 Reset price axis
+│   │   ├── Restore autoscale state.
+│   │   ├── Recalculate autoscale range using existing PriceScale/autoscale architecture.
+│   │   └── Invalidate only affected vertical geometry.
+│   │
+│   ├── T17.13.4 Reset time axis
+│   │   ├── Restore configured/default horizontal scale state according to existing TimeScale semantics.
+│   │   └── Preserve unrelated price ranges.
+│   │
+│   └── T17.13.5 Test reset
+│       ├── Manual price scaling followed by double-click restores autoscale.
+│       ├── Reset of Pane 1 does not reset Pane 0.
+│       └── Disabled reset performs no mutation.
+│
+├── T17.14 MULTI-PANE HORIZONTAL SYNCHRONIZATION
+│   │
+│   ├── T17.14.1 Define shared horizontal viewport owner
+│   │   ├── Chart-level TimeScale owns logical horizontal range.
+│   │   ├── All panes consume the same visible_start.
+│   │   ├── All panes consume the same visible_end.
+│   │   └── All panes consume the same bar_spacing.
+│   │
+│   ├── T17.14.2 Route horizontal pan
+│   │   ├── Any pane initiating chart pan modifies shared TimeScale.
+│   │   ├── Do not create pane-local horizontal ranges.
+│   │   └── Invalidate all panes horizontally.
+│   │
+│   ├── T17.14.3 Route horizontal zoom
+│   │   ├── Any pane initiating time zoom modifies shared TimeScale.
+│   │   ├── Preserve the cursor logical index globally.
+│   │   └── Re-render all panes.
+│   │
+│   └── T17.14.4 Test synchronization
+│       ├── Pan Pane 0 → Pane 1 and Pane 2 move identically.
+│       ├── Zoom Pane 1 → all panes share bar_spacing.
+│       ├── Same logical index produces same X coordinate across panes.
+│       └── Vertical ranges remain independent.
+│
+├── T17.15 PANE-SPECIFIC VERTICAL SCALING
+│   │
+│   ├── T17.15.1 Resolve active pane
+│   │   ├── Determine pane from pointer y.
+│   │   ├── Ignore inactive panes.
+│   │   └── Use pane-local PriceScale.
+│   │
+│   ├── T17.15.2 Apply vertical scaling
+│   │   ├── Modify only active pane.
+│   │   ├── Preserve shared horizontal TimeScale.
+│   │   └── Preserve other pane price ranges.
+│   │
+│   ├── T17.15.3 Handle pane-specific autoscale
+│   │   ├── Autoscale state belongs to each pane.
+│   │   ├── Manual scaling disables/overrides autoscale for that pane according to existing scale semantics.
+│   │   └── New data only autoscale panes that are configured to autoscale.
+│   │
+│   └── T17.15.4 Test pane isolation
+│       ├── Scale RSI pane → candle pane unchanged.
+│       ├── Scale volume pane → RSI range unchanged.
+│       └── Crosshair Y conversion uses active pane's PriceScale.
+│
+├── T17.16 FOLLOW-LATEST ENGINE
+│   │
+│   ├── T17.16.1 Define latest-edge detection
+│   │   ├── Determine latest data logical index.
+│   │   ├── Determine viewport visible_end.
+│   │   ├── Account for right_offset.
+│   │   └── Define latest-edge tolerance using logical coordinates rather than exact pixel equality.
+│   │
+│   ├── T17.16.2 Initialize follow_latest
+│   │   ├── When viewport initializes at latest edge, set follow_latest = true.
+│   │   └── Preserve explicit user historical positioning when loading an existing viewport.
+│   │
+│   ├── T17.16.3 Disable follow_latest after historical navigation
+│   │   ├── Detect deliberate pan away from latest edge.
+│   │   ├── Set follow_latest = false.
+│   │   └── Do not disable it merely because of cursor movement.
+│   │
+│   ├── T17.16.4 Restore follow_latest
+│   │   ├── Detect viewport returning to latest edge.
+│   │   ├── Set follow_latest = true.
+│   │   └── Allow subsequent new bars to advance viewport.
+│   │
+│   ├── T17.16.5 Process new bar while following
+│   │   ├── Detect data append.
+│   │   ├── If follow_latest = true and shift_visible_range_on_new_bar = true, shift visible range toward latest bar.
+│   │   ├── Preserve configured right_offset.
+│   │   └── Do not alter stored drawing coordinates.
+│   │
+│   ├── T17.16.6 Process new bar while historical
+│   │   ├── If follow_latest = false, do not shift viewport to latest.
+│   │   ├── Keep user's historical logical range stable.
+│   │   └── Update only data-dependent rendering.
+│   │
+│   └── T17.16.7 Test follow-latest
+│       ├── Latest visible + append → viewport follows.
+│       ├── Historical viewport + append → viewport remains historical.
+│       ├── Return to latest → follow_latest becomes true.
+│       └── Disabled shift_visible_range_on_new_bar prevents automatic following.
+│
+├── T17.17 RIGHT-OFFSET MANAGEMENT
+│   │
+│   ├── T17.17.1 Define right offset
+│   │   ├── Default right_offset = 0.0 bars.
+│   │   ├── Interpret offset in logical bars.
+│   │   └── Do not hard-code viewport end to last data index.
+│   │
+│   ├── T17.17.2 Apply right offset during initialization
+│   │   ├── Place latest data edge according to right_offset.
+│   │   └── Preserve configured bar_spacing.
+│   │
+│   ├── T17.17.3 Apply right offset during pan
+│   │   ├── Keep latest-edge relationship consistent.
+│   │   └── Do not accidentally eliminate configured offset.
+│   │
+│   ├── T17.17.4 Apply right offset during zoom
+│   │   ├── Preserve cursor-centered zoom first.
+│   │   ├── Apply edge constraints second.
+│   │   └── Maintain right-offset semantics.
+│   │
+│   └── T17.17.5 Test right offset
+│       ├── right_offset = 0 places latest edge according to default TimeScale behaviour.
+│       ├── Positive right_offset leaves logical space after latest bar.
+│       └── Zoom/pan do not silently overwrite configured offset.
+│
+├── T17.18 FIXED EDGE CONSTRAINTS
+│   │
+│   ├── T17.18.1 Implement fix_left_edge
+│   │   ├── Default false.
+│   │   ├── When true, preserve configured left logical boundary during operations that would move it.
+│   │   └── Resolve conflict with cursor-centered zoom through TimeScale constraint logic.
+│   │
+│   ├── T17.18.2 Implement fix_right_edge
+│   │   ├── Default false.
+│   │   ├── When true, preserve configured right logical boundary.
+│   │   └── Resolve conflict with cursor-centered zoom through TimeScale constraint logic.
+│   │
+│   ├── T17.18.3 Validate combined constraints
+│   │   ├── Both false → normal navigation.
+│   │   ├── Left true → preserve left edge.
+│   │   ├── Right true → preserve right edge.
+│   │   └── Both true → prevent operations that would violate either boundary.
+│   │
+│   └── T17.18.4 Test constraints
+│       ├── Repeated left pan does not produce invalid range.
+│       ├── Repeated right pan does not produce invalid range.
+│       ├── Zoom respects fixed edges.
+│       └── Fractional ranges remain valid.
+│
+├── T17.19 SHAPE NAVIGATION INTERACTION
+│   │
+│   ├── T17.19.1 Route selected shape body
+│   │   ├── Use existing shape hit testing.
+│   │   ├── If body hit and shape is unlocked, enter DRAGGING_SHAPE.
+│   │   ├── If shape is locked, prevent movement.
+│   │   └── Do not enter chart drag.
+│   │
+│   ├── T17.19.2 Route shape handle
+│   │   ├── Use existing handle hit testing.
+│   │   ├── Enter RESIZING_SHAPE.
+│   │   └── Prevent chart pan.
+│   │
+│   ├── T17.19.3 Maintain chart viewport
+│   │   ├── Shape dragging modifies shape anchors through existing DrawingObject architecture.
+│   │   ├── Viewport state remains unchanged.
+│   │   └── Do not interpret shape movement as chart navigation.
+│   │
+│   └── T17.19.4 Test shape priority
+│       ├── Drag line → line moves.
+│       ├── Drag rectangle handle → rectangle changes.
+│       ├── Drag locked shape → chart does not unexpectedly pan if interaction is consumed by selection.
+│       └── Empty-pane drag → chart pans.
+│
+├── T17.20 WHEEL EVENT ROUTING
+│   │
+│   ├── T17.20.1 Determine wheel intent
+│   │   ├── Read normalized delta_x and delta_y.
+│   │   ├── Determine whether event maps to horizontal scrolling or scaling according to configured interaction.
+│   │   └── Keep wheel behaviour configurable.
+│   │
+│   ├── T17.20.2 Route horizontal wheel movement
+│   │   ├── If horizontal wheel scrolling is supported, convert delta_x to logical movement.
+│   │   ├── Use existing TimeScale.
+│   │   └── Apply viewport constraints.
+│   │
+│   ├── T17.20.3 Route vertical wheel scaling
+│   │   ├── If mouse-wheel scaling is enabled, map delta_y to horizontal zoom.
+│   │   ├── Anchor at pointer x.
+│   │   └── Apply min/max spacing.
+│   │
+│   └── T17.20.4 Test wheel routing
+│       ├── Scaling disabled → no zoom.
+│       ├── Scaling enabled → spacing changes.
+│       ├── Pointer anchor remains stable.
+│       └── Unsupported wheel combinations do not modify unrelated panes.
+│
+├── T17.21 KINETIC TOUCH SCROLLING
+│   │
+│   ├── T17.21.1 Configure kinetic defaults
+│   │   ├── kinetic_scroll.touch = true.
+│   │   └── kinetic_scroll.mouse = false.
+│   │
+│   ├── T17.21.2 Capture touch velocity
+│   │   ├── Store recent touch positions.
+│   │   ├── Store corresponding timestamps.
+│   │   ├── Calculate logical velocity from pixel velocity / bar_spacing.
+│   │   └── Use only recent movement samples.
+│   │
+│   ├── T17.21.3 Start kinetic state
+│   │   ├── Start KINETIC_SCROLL after touch release when velocity exceeds minimum threshold.
+│   │   ├── Do not start kinetic scrolling for negligible movement.
+│   │   └── Do not start kinetic scrolling after shape manipulation.
+│   │
+│   ├── T17.21.4 Apply kinetic movement
+│   │   ├── Advance viewport using current logical velocity.
+│   │   ├── Gradually reduce velocity.
+│   │   ├── Stop when velocity reaches configured minimum.
+│   │   └── Stop immediately at hard viewport boundaries.
+│   │
+│   ├── T17.21.5 Coalesce kinetic renders
+│   │   ├── Update viewport.
+│   │   ├── Invalidate affected layers.
+│   │   └── Use existing Render Scheduler rather than a second render loop.
+│   │
+│   └── T17.21.6 Test kinetic scrolling
+│       ├── Touch drag releases with sufficient velocity → inertia.
+│       ├── Slow drag → no visible inertia.
+│       ├── Mouse drag → no inertia by default.
+│       ├── Boundary → inertia stops.
+│       └── New pointer interaction cancels kinetic scrolling.
+│
+├── T17.22 INTERACTION CANCELLATION
+│   │
+│   ├── T17.22.1 Cancel on Escape
+│   │   ├── Cancel PRESS_PENDING.
+│   │   ├── Cancel active drawing creation where existing DrawingController owns it.
+│   │   ├── Stop kinetic scrolling.
+│   │   └── Restore normal interaction state.
+│   │
+│   ├── T17.22.2 Cancel on new pointer ownership
+│   │   ├── New primary pointer interaction cancels kinetic scrolling.
+│   │   ├── Do not allow simultaneous chart drag and shape drag.
+│   │   └── Do not allow simultaneous price-scale and time-scale drag.
+│   │
+│   └── T17.22.3 Test cancellation
+│       ├── Escape exits pending interaction.
+│       ├── New pointer cancels inertia.
+│       └── State returns to valid HOVER/IDLE state.
+│
+├── T17.23 VIEWPORT → COORDINATE INTEGRATION
+│   │
+│   ├── T17.23.1 Update TimeScale
+│   │   ├── Pass visible_start.
+│   │   ├── Pass visible_end.
+│   │   ├── Pass bar_spacing.
+│   │   └── Preserve existing logical-index conversion.
+│   │
+│   ├── T17.23.2 Update pane transforms
+│   │   ├── Use shared X transform from TimeScale.
+│   │   ├── Use pane-specific Y transform from PriceScale.
+│   │   └── Do not create per-series transforms.
+│   │
+│   ├── T17.23.3 Validate candle alignment
+│   │   ├── Candle X positions use current TimeScale.
+│   │   ├── Candle Y positions use current PriceScale.
+│   │   └── Existing candle geometry remains authoritative for candle shape.
+│   │
+│   ├── T17.23.4 Validate drawing alignment
+│   │   ├── Shape logical indexes use current TimeScale.
+│   │   ├── Shape prices use active pane PriceScale.
+│   │   └── Stored shape anchors remain unchanged during navigation.
+│   │
+│   ├── T17.23.5 Validate grid alignment
+│   │   ├── Vertical grid uses TimeScale ticks.
+│   │   └── Horizontal grid uses pane PriceScale ticks.
+│   │
+│   └── T17.23.6 Validate crosshair alignment
+│       ├── Crosshair X uses shared TimeScale.
+│       ├── Crosshair Y uses active pane PriceScale.
+│       └── Crosshair remains correctly aligned after pan/zoom.
+│
+├── T17.24 INVALIDATION INTEGRATION
+│   │
+│   ├── T17.24.1 Define viewport invalidation categories
+│   │   ├── VIEWPORT_CHANGED.
+│   │   ├── TIME_SCALE_CHANGED.
+│   │   ├── PRICE_SCALE_CHANGED.
+│   │   ├── CROSSHAIR_CHANGED.
+│   │   └── INTERACTION_OVERLAY_CHANGED.
+│   │
+│   ├── T17.24.2 Invalidate after horizontal pan
+│   │   ├── TimeScale.
+│   │   ├── Grid.
+│   │   ├── Series X geometry.
+│   │   ├── Shapes X geometry.
+│   │   ├── Axes.
+│   │   └── Crosshair only when visible.
+│   │
+│   ├── T17.24.3 Invalidate after horizontal zoom
+│   │   ├── TimeScale.
+│   │   ├── Grid.
+│   │   ├── Series geometry.
+│   │   ├── Shape geometry.
+│   │   ├── Time axis.
+│   │   └── Crosshair/handles when visible.
+│   │
+│   ├── T17.24.4 Invalidate after price scaling
+│   │   ├── Active pane PriceScale.
+│   │   ├── Active pane series.
+│   │   ├── Active pane shapes.
+│   │   ├── Horizontal grid.
+│   │   ├── Price axis.
+│   │   └── Crosshair Y/label when visible.
+│   │
+│   └── T17.24.5 Prevent unnecessary invalidation
+│       ├── Do not invalidate candle data when only viewport changes.
+│       ├── Do not invalidate unrelated panes for pane-local price changes.
+│       ├── Do not rebuild shape models for pan/zoom.
+│       └── Do not create a second render loop.
+│
+├── T17.25 RENDER REQUEST COALESCING
+│   │
+│   ├── T17.25.1 Request render after state mutation
+│   │   ├── Mark dirty layers.
+│   │   ├── Notify existing Render Scheduler.
+│   │   └── Do not call Canvas rendering directly.
+│   │
+│   ├── T17.25.2 Merge multiple interaction events
+│   │   ├── Multiple pointer_move events before a render produce one scheduled render.
+│   │   ├── Multiple wheel events within one scheduler cycle merge into current viewport state.
+│   │   ├── Multiple invalidation flags are OR-combined.
+│   │   └── Already scheduled render must not schedule another redundant frame.
+│   │
+│   ├── T17.25.3 Keep interaction path lightweight
+│   │   ├── Pointer event updates state.
+│   │   ├── Pointer event performs only required coordinate conversions.
+│   │   ├── Pointer event does not rebuild all geometry.
+│   │   └── Pointer event does not allocate large temporary collections.
+│   │
+│   └── T17.25.4 Test coalescing
+│       ├── 20 pointer movements before render → at most one pending render.
+│       ├── Multiple dirty flags merge correctly.
+│       └── Final rendered state equals latest viewport state.
+│
+├── T17.26 RESIZE INTERACTION INTEGRATION
+│   │
+│   ├── T17.26.1 Receive chart resize
+│   │   ├── Receive new chart width.
+│   │   ├── Receive new chart height.
+│   │   └── Preserve existing viewport state where configured.
+│   │
+│   ├── T17.26.2 Update horizontal viewport
+│   │   ├── Recalculate visible range using existing TimeScale.
+│   │   ├── Preserve right/left constraints.
+│   │   └── Respect lockVisibleTimeRangeOnResize if introduced/configured.
+│   │
+│   ├── T17.26.3 Update pane dimensions
+│   │   ├── Recalculate pane heights through existing pane layout.
+│   │   ├── Preserve shared horizontal range.
+│   │   └── Preserve pane-specific price ranges unless autoscale requires recalculation.
+│   │
+│   └── T17.26.4 Test resize
+│       ├── Resize does not reset drawing coordinates.
+│       ├── Candles remain correctly positioned.
+│       ├── Crosshair remains mathematically aligned.
+│       └── Multiple panes retain synchronized X positions.
+│
+├── T17.27 DEVICE PIXEL RATIO INTEGRATION
+│   │
+│   ├── T17.27.1 Preserve logical interaction coordinates
+│   │   ├── Pointer coordinates remain in logical canvas/display coordinates.
+│   │   ├── Do not multiply logical pointer movement by device pixel ratio twice.
+│   │   └── Existing Canvas renderer owns physical-pixel conversion.
+│   │
+│   ├── T17.27.2 Pan consistency
+│   │   ├── Calculate dx in logical screen units.
+│   │   ├── Convert to logical index using logical bar_spacing.
+│   │   └── Ensure identical physical interaction behaviour at 1x, 1.25x, 1.5x, 2x and 3x.
+│   │
+│   ├── T17.27.3 Zoom consistency
+│   │   ├── Cursor anchor is resolved in logical coordinate space.
+│   │   └── Device pixel ratio must not alter logical zoom semantics.
+│   │
+│   └── T17.27.4 Test DPR
+│       ├── Pan at 1x.
+│       ├── Pan at 1.25x.
+│       ├── Pan at 1.5x.
+│       ├── Pan at 2x.
+│       ├── Pan at 3x.
+│       └── Verify identical logical movement per screen movement.
+│
+├── T17.28 INTERACTION CONFIGURATION
+│   │
+│   ├── T17.28.1 Define centralized defaults
+│   │   ├── bar_spacing = 6.0.
+│   │   ├── min_bar_spacing = 0.5.
+│   │   ├── max_bar_spacing = 0.0.
+│   │   ├── right_offset = 0.0.
+│   │   ├── fix_left_edge = false.
+│   │   ├── fix_right_edge = false.
+│   │   ├── pressed_mouse_move = true.
+│   │   ├── mouse_wheel_scroll = true.
+│   │   ├── horizontal_touch_drag = true.
+│   │   ├── vertical_touch_drag = true.
+│   │   ├── mouse_wheel_scale = true.
+│   │   ├── pinch_scale = true.
+│   │   ├── time_axis_pressed_mouse_move = true.
+│   │   ├── price_axis_pressed_mouse_move = true.
+│   │   ├── axis_double_click_reset = true.
+│   │   ├── kinetic_touch = true.
+│   │   ├── kinetic_mouse = false.
+│   │   ├── shift_visible_range_on_new_bar = true.
+│   │   └── crosshair_mode = MAGNET.
+│   │
+│   ├── T17.28.2 Validate configuration
+│   │   ├── Reject min_bar_spacing <= 0.
+│   │   ├── Reject max_bar_spacing < 0.
+│   │   ├── Interpret max_bar_spacing = 0 as unlimited.
+│   │   ├── Reject bar_spacing <= 0.
+│   │   ├── Clamp configured initial spacing to min/max constraints.
+│   │   └── Validate enum values for crosshair mode.
+│   │
+│   ├── T17.28.3 Make configuration immutable during gesture
+│   │   ├── Snapshot required gesture parameters at gesture start when necessary.
+│   │   └── Avoid inconsistent behaviour if configuration changes mid-drag.
+│   │
+│   └── T17.28.4 Test configuration
+│       ├── Each default matches configured target.
+│       ├── Changing one option does not change unrelated options.
+│       └── Invalid spacing configuration is rejected or normalized deterministically.
+│
+├── T17.29 POINTER-LEAVE / POINTER-ENTER
+│   │
+│   ├── T17.29.1 Pointer enter
+│   │   ├── Determine chart/pane containment.
+│   │   ├── Allow crosshair activation on subsequent movement.
+│   │   └── Do not automatically alter viewport.
+│   │
+│   ├── T17.29.2 Pointer leave during hover
+│   │   ├── Hide crosshair.
+│   │   ├── Clear hover-only interaction state.
+│   │   └── Preserve viewport.
+│   │
+│   ├── T17.29.3 Pointer leave during drag
+│   │   ├── Preserve active drag when backend supports pointer capture.
+│   │   ├── Otherwise terminate safely according to existing event model.
+│   │   └── Never leave the state machine permanently in a dragging state.
+│   │
+│   └── T17.29.4 Test pointer boundaries
+│       ├── Leave chart → crosshair hidden.
+│       ├── Re-enter chart → crosshair eligible.
+│       └── Dragging does not corrupt state after pointer leaves.
+│
+├── T17.30 VIEWPORT CONSISTENCY VERIFICATION
+│   │
+│   ├── T17.30.1 Verify logical-index consistency
+│   │   ├── index_to_x(x_to_index(x)) remains approximately x.
+│   │   ├── Preserve fractional indexes.
+│   │   └── Verify at multiple bar spacings.
+│   │
+│   ├── T17.30.2 Verify datetime consistency
+│   │   ├── Logical index resolves through existing TimeScale.
+│   │   ├── Pan does not alter stored datetime.
+│   │   └── Zoom does not alter stored datetime.
+│   │
+│   ├── T17.30.3 Verify price consistency
+│   │   ├── price_to_y(y_to_price(y)) remains approximately y.
+│   │   ├── Pan does not alter stored prices.
+│   │   └── Price scaling changes only viewport transformation.
+│   │
+│   ├── T17.30.4 Verify shape consistency
+│   │   ├── Shape anchor remains same logical index after pan.
+│   │   ├── Shape anchor remains same price after pan.
+│   │   ├── Shape anchor remains same logical index after zoom.
+│   │   └── Shape anchor remains same price after zoom.
+│   │
+│   └── T17.30.5 Verify cross-component alignment
+│       ├── Candle X == grid time X for same logical index.
+│       ├── Shape X == candle/grid X for same logical index.
+│       ├── Candle Y == shape Y for same price in same pane.
+│       ├── Crosshair X aligns with selected logical index.
+│       └── Crosshair Y aligns with selected price.
+│
+├── T17.31 BEHAVIOURAL TEST SUITE
+│   │
+│   ├── T17.31.1 Normal hover
+│   │   ├── Move pointer inside chart.
+│   │   ├── EXPECT crosshair visible.
+│   │   ├── EXPECT logical time correct.
+│   │   └── EXPECT pane price correct.
+│   │
+│   ├── T17.31.2 Chart drag
+│   │   ├── Pointer down on empty chart.
+│   │   ├── Move beyond drag threshold.
+│   │   ├── EXPECT viewport changes.
+│   │   ├── EXPECT crosshair hidden.
+│   │   └── Pointer up → EXPECT crosshair eligible.
+│   │
+│   ├── T17.31.3 Shape drag
+│   │   ├── Pointer down on selected shape.
+│   │   ├── Move.
+│   │   ├── EXPECT shape moves.
+│   │   ├── EXPECT chart does not pan.
+│   │   └── EXPECT viewport unchanged.
+│   │
+│   ├── T17.31.4 Shape handle drag
+│   │   ├── Pointer down on handle.
+│   │   ├── Move.
+│   │   ├── EXPECT only targeted anchor changes.
+│   │   └── EXPECT chart does not pan.
+│   │
+│   ├── T17.31.5 Horizontal zoom
+│   │   ├── Position pointer over known candle.
+│   │   ├── Wheel zoom.
+│   │   ├── EXPECT bar_spacing changes.
+│   │   ├── EXPECT candle remains approximately under cursor.
+│   │   └── EXPECT shape attached to candle remains aligned.
+│   │
+│   ├── T17.31.6 Multi-pane navigation
+│   │   ├── Pan Pane 0.
+│   │   ├── EXPECT Pane 1 and Pane 2 use same logical range.
+│   │   └── EXPECT all panes share X coordinates.
+│   │
+│   ├── T17.31.7 Pane-specific scaling
+│   │   ├── Scale Pane 1.
+│   │   ├── EXPECT Pane 0 unchanged.
+│   │   └── EXPECT Pane 2 unchanged.
+│   │
+│   ├── T17.31.8 Live bar following
+│   │   ├── Keep latest bar visible.
+│   │   ├── Append new bar.
+│   │   ├── EXPECT viewport advances.
+│   │   └── EXPECT right_offset preserved.
+│   │
+│   ├── T17.31.9 Historical inspection
+│   │   ├── Scroll away from latest.
+│   │   ├── EXPECT follow_latest = false.
+│   │   ├── Append new bar.
+│   │   └── EXPECT viewport does not jump.
+│   │
+│   ├── T17.31.10 Return to latest
+│   │   ├── Scroll to latest edge.
+│   │   ├── EXPECT follow_latest = true.
+│   │   └── Append next bar.
+│   │
+│   ├── T17.31.11 Axis reset
+│   │   ├── Manually scale price axis.
+│   │   ├── Double-click axis.
+│   │   └── EXPECT autoscale restored.
+│   │
+│   ├── T17.31.12 Boundary navigation
+│   │   ├── Repeatedly scroll before first bar.
+│   │   ├── EXPECT valid logical range.
+│   │   ├── Repeatedly scroll beyond latest edge.
+│   │   └── EXPECT configured right/edge constraints respected.
+│   │
+│   ├── T17.31.13 Crosshair after drag
+│   │   ├── Drag chart.
+│   │   ├── EXPECT crosshair hidden.
+│   │   ├── Release.
+│   │   ├── Move pointer.
+│   │   └── EXPECT crosshair returns normally.
+│   │
+│   ├── T17.31.14 Resize during navigation
+│   │   ├── Pan chart.
+│   │   ├── Resize chart.
+│   │   ├── EXPECT logical range remains valid.
+│   │   └── EXPECT candles/grid/shapes/crosshair remain aligned.
+│   │
+│   └── T17.31.15 Zoom/scale combination
+│       ├── Zoom from 6.0 to 1.0.
+│       ├── Pan.
+│       ├── Zoom from 1.0 to 20.0.
+│       ├── Price-scale active pane.
+│       └── EXPECT all coordinate relationships remain valid.
+│
+└── T17.32 PERFORMANCE / HOT-PATH VALIDATION
+    │
+    ├── T17.32.1 Pointer-move hot path
+    │   ├── Read current pointer coordinates.
+    │   ├── Determine active interaction state.
+    │   ├── Perform only required coordinate conversion.
+    │   ├── Update viewport/crosshair state.
+    │   ├── Set dirty flags.
+    │   └── Request/coalesce render.
+    │
+    ├── T17.32.2 Pan hot path
+    │   ├── Calculate dx once per event.
+    │   ├── Divide by current bar_spacing once.
+    │   ├── Update fractional logical range.
+    │   ├── Avoid scanning entire dataset.
+    │   ├── Avoid rebuilding all drawing objects.
+    │   ├── Avoid reconstructing series data.
+    │   └── Avoid direct Canvas recreation.
+    │
+    ├── T17.32.3 Zoom hot path
+    │   ├── Resolve cursor logical index once before spacing mutation.
+    │   ├── Calculate new spacing once.
+    │   ├── Clamp once.
+    │   ├── Restore cursor anchor once.
+    │   ├── Set invalidation flags.
+    │   └── Defer actual rendering to Render Scheduler.
+    │
+    ├── T17.32.4 Price-scale hot path
+    │   ├── Operate only on active pane.
+    │   ├── Avoid recalculating unrelated panes.
+    │   ├── Avoid rebuilding horizontal TimeScale.
+    │   └── Reuse existing PriceScale transforms.
+    │
+    ├── T17.32.5 Kinetic hot path
+    │   ├── Update only viewport velocity/state.
+    │   ├── Reuse existing render scheduler.
+    │   ├── Avoid per-frame object allocation.
+    │   └── Stop immediately at boundaries.
+    │
+    └── T17.32.6 Performance tests
+        ├── Pointer movement must not perform full dataset traversal.
+        ├── Pan must not recreate persistent drawing objects.
+        ├── Zoom must not duplicate viewport state.
+        ├── Multiple input events must coalesce into scheduled renders.
+        └── Interaction remains responsive with thousands of candles and many drawings.

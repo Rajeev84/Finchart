@@ -1,0 +1,395 @@
+CHARTING CORE
+│
+├── A. CONFIGURATION
+│   │
+│   ├── A1. Numeric Constants
+│   │   ├── A1.1 Set bar_spacing = 6.0
+│   │   ├── A1.2 Set min_bar_spacing = 0.5
+│   │   ├── A1.3 Set right_offset = 5.0
+│   │   ├── A1.4 Set overscan = 20
+│   │   ├── A1.5 Set price_top_margin = 0.20
+│   │   ├── A1.6 Set price_bottom_margin = 0.10
+│   │   ├── A1.7 Set wick_width = 1.0
+│   │   ├── A1.8 Set candle_special_min = 2.5
+│   │   ├── A1.9 Set candle_special_max = 4.0
+│   │   ├── A1.10 Set candle_special_width = 3.0
+│   │   ├── A1.11 Set zoom_divisor = 10.0
+│   │   ├── A1.12 Set wheel_zoom_factor = 0.10
+│   │   ├── A1.13 Set wheel_pan_factor = 1.0
+│   │   ├── A1.14 Set conflation_threshold = 0.5
+│   │   └── A1.15 Set density_threshold = 1.0
+│   │
+│   └── A2. Visual Constants
+│       ├── A2.1 bull_color = #26A69A
+│       ├── A2.2 bear_color = #EF5350
+│       ├── A2.3 bull_wick_color = #26A69A
+│       ├── A2.4 bear_wick_color = #EF5350
+│       ├── A2.5 neutral_wick_color = #737375
+│       ├── A2.6 grid_color = #D6DCDE
+│       ├── A2.7 crosshair_color = #758696
+│       └── A2.8 crosshair_label_background = #4C525E
+│
+├── B. DATA PRIMITIVES
+│   │
+│   ├── B1. Candle Record
+│   │   ├── B1.1 Store timestamp
+│   │   ├── B1.2 Store open
+│   │   ├── B1.3 Store high
+│   │   ├── B1.4 Store low
+│   │   ├── B1.5 Store close
+│   │   └── B1.6 Store volume
+│   │
+│   ├── B2. Candle Validation
+│   │   ├── B2.1 Validate finite OHLC
+│   │   ├── B2.2 Validate high >= low
+│   │   ├── B2.3 Validate open within high/low
+│   │   └── B2.4 Validate close within high/low
+│   │
+│   └── B3. Indexed Data Store
+│       ├── B3.1 Append candle
+│       ├── B3.2 Retrieve candle by index
+│       ├── B3.3 Return data_count
+│       ├── B3.4 Update existing candle
+│       └── B3.5 Return index bounds
+│
+├── C. LOGICAL INDEX PRIMITIVES
+│   │
+│   ├── C1. Index → Logical Delta
+│   │   └── C1.1 Calculate index - viewport_origin
+│   │
+│   ├── C2. Logical Delta → Pixel Delta
+│   │   └── C2.1 Calculate logical_delta × bar_spacing
+│   │
+│   ├── C3. Pixel Delta → Logical Delta
+│   │   └── C3.1 Calculate pixel_delta / bar_spacing
+│   │
+│   ├── C4. Index → X
+│   │   └── C4.1 Calculate origin_x + delta × spacing
+│   │
+│   └── C5. X → Float Index
+│       ├── C5.1 Calculate x - origin_x
+│       ├── C5.2 Divide by bar_spacing
+│       └── C5.3 Add viewport_origin
+│
+├── D. TIME SCALE
+│   │
+│   ├── D1. Spacing State
+│   │   ├── D1.1 Initialize spacing = 6.0
+│   │   ├── D1.2 Enforce minimum = 0.5
+│   │   └── D1.3 Accept unlimited maximum
+│   │
+│   ├── D2. Visible Count
+│   │   ├── D2.1 Retrieve chart_width
+│   │   ├── D2.2 Retrieve bar_spacing
+│   │   └── D2.3 Calculate width / spacing
+│   │
+│   ├── D3. Viewport Origin
+│   │   ├── D3.1 Store logical_position as float
+│   │   └── D3.2 Preserve fractional values
+│   │
+│   ├── D4. Pan
+│   │   ├── D4.1 Receive pixel delta
+│   │   ├── D4.2 Convert pixel delta to logical delta
+│   │   └── D4.3 Add logical delta to position
+│   │
+│   ├── D5. Zoom Delta
+│   │   ├── D5.1 Receive zoom_scale
+│   │   ├── D5.2 Multiply spacing by zoom_scale
+│   │   ├── D5.3 Divide by 10
+│   │   └── D5.4 Add delta to spacing
+│   │
+│   └── D6. Zoom Clamp
+│       └── D6.1 Clamp spacing to >= 0.5
+│
+├── E. VIEWPORT
+│   │
+│   ├── E1. Visible From
+│   │   └── E1.1 Return fractional viewport origin
+│   │
+│   ├── E2. Visible To
+│   │   ├── E2.1 Retrieve visible bar count
+│   │   └── E2.2 Calculate from + visible_count
+│   │
+│   ├── E3. Render Start
+│   │   ├── E3.1 floor(visible_from)
+│   │   ├── E3.2 subtract overscan = 20
+│   │   └── E3.3 clamp to 0
+│   │
+│   ├── E4. Render End
+│   │   ├── E4.1 ceil(visible_to)
+│   │   ├── E4.2 add overscan = 20
+│   │   └── E4.3 clamp to data_count - 1
+│   │
+│   └── E5. Visible Range Object
+│       ├── E5.1 Store visible_from
+│       ├── E5.2 Store visible_to
+│       ├── E5.3 Store render_first
+│       └── E5.4 Store render_last
+│
+├── F. CURSOR-CENTERED ZOOM
+│   │
+│   ├── F1. Capture Anchor
+│   │   ├── F1.1 Receive cursor_x
+│   │   └── F1.2 Convert cursor_x → float logical index
+│   │
+│   ├── F2. Calculate New Spacing
+│   │   ├── F2.1 Calculate proportional delta
+│   │   └── F2.2 Clamp to 0.5
+│   │
+│   ├── F3. Calculate Anchor X After Zoom
+│   │   └── F3.1 Convert stored logical index → x
+│   │
+│   ├── F4. Calculate Anchor Error
+│   │   └── F4.1 Calculate target_x - actual_anchor_x
+│   │
+│   └── F5. Correct Viewport
+│       ├── F5.1 Convert pixel error → logical error
+│       └── F5.2 Apply correction
+│
+├── G. PRICE SCALE
+│   │
+│   ├── G1. Price Range
+│   │   ├── G1.1 Retrieve visible candles
+│   │   ├── G1.2 Find minimum low
+│   │   └── G1.3 Find maximum high
+│   │
+│   ├── G2. Scale Height
+│   │   ├── G2.1 Calculate top = height × 0.20
+│   │   ├── G2.2 Calculate bottom = height × 0.10
+│   │   └── G2.3 Calculate usable height
+│   │
+│   ├── G3. Normalize Price
+│   │   ├── G3.1 Calculate price - low
+│   │   └── G3.2 Divide by high - low
+│   │
+│   ├── G4. Price → Y
+│   │   ├── G4.1 Invert normalized value
+│   │   ├── G4.2 Multiply by usable height
+│   │   └── G4.3 Add top margin
+│   │
+│   └── G5. Zero-Range Handling
+│       └── G5.1 Return center-compatible y when high == low
+│
+├── H. CANDLE GEOMETRY
+│   │
+│   ├── H1. Candle Width
+│   │   │
+│   │   ├── H1.1 Detect spacing 2.5–4.0
+│   │   │   └── Return 3 px
+│   │   │
+│   │   ├── H1.2 Calculate large-spacing coefficient
+│   │   │   ├── max(spacing, 4)
+│   │   │   ├── subtract 4
+│   │   │   ├── atan()
+│   │   │   ├── divide by π × 0.5
+│   │   │   └── calculate 1 - 0.2 × normalized
+│   │   │
+│   │   ├── H1.3 Calculate width
+│   │   │   └── floor(spacing × coefficient)
+│   │   │
+│   │   ├── H1.4 Cap width
+│   │   │   └── min(width, floor(spacing))
+│   │   │
+│   │   └── H1.5 Apply minimum
+│   │       └── max(width, 1)
+│   │
+│   ├── H2. Wick Width
+│   │   └── H2.1 Return 1 px
+│   │
+│   ├── H3. Candle Center
+│   │   └── H3.1 Convert logical index → x
+│   │
+│   ├── H4. Body Horizontal Bounds
+│   │   ├── H4.1 Calculate width / 2
+│   │   ├── H4.2 center - half_width
+│   │   └── H4.3 center + half_width
+│   │
+│   ├── H5. Body Vertical Bounds
+│   │   ├── H5.1 min(open_y, close_y)
+│   │   └── H5.2 max(open_y, close_y)
+│   │
+│   ├── H6. Minimum Body Height
+│   │   ├── H6.1 Detect open_y == close_y
+│   │   └── H6.2 Enforce 1 px minimum
+│   │
+│   └── H7. Wick Bounds
+│       ├── H7.1 wick_top = high_y
+│       └── H7.2 wick_bottom = low_y
+│
+├── I. CANDLE STYLE
+│   │
+│   ├── I1. Bull Detection
+│   │   └── I1.1 close > open
+│   │
+│   ├── I2. Bear Detection
+│   │   └── I2.1 close < open
+│   │
+│   ├── I3. Neutral Detection
+│   │   └── I3.1 close == open
+│   │
+│   ├── I4. Bull Style
+│   │   ├── I4.1 body = #26A69A
+│   │   └── I4.2 wick = #26A69A
+│   │
+│   ├── I5. Bear Style
+│   │   ├── I5.1 body = #EF5350
+│   │   └── I5.2 wick = #EF5350
+│   │
+│   └── I6. Neutral Style
+│       └── I6.1 wick = #737375
+│
+├── J. CANVAS ITEM POOL
+│   │
+│   ├── J1. Calculate Required Pool
+│   │   ├── J1.1 Calculate visible count
+│   │   ├── J1.2 Calculate overscan count = 40
+│   │   └── J1.3 required_slots = visible + 40
+│   │
+│   ├── J2. Create Wick Item
+│   │   └── J2.1 Create Canvas line
+│   │
+│   ├── J3. Create Body Item
+│   │   └── J3.1 Create Canvas rectangle
+│   │
+│   ├── J4. Bind Slot
+│   │   ├── J4.1 Store logical index
+│   │   ├── J4.2 Store wick Canvas ID
+│   │   └── J4.3 Store body Canvas ID
+│   │
+│   ├── J5. Update Wick Item
+│   │   ├── J5.1 Update coordinates
+│   │   ├── J5.2 Update width
+│   │   └── J5.3 Update color
+│   │
+│   ├── J6. Update Body Item
+│   │   ├── J6.1 Update coordinates
+│   │   ├── J6.2 Update fill
+│   │   └── J6.3 Update outline
+│   │
+│   └── J7. Hide Unused Slot
+│       └── J7.1 Set Canvas state hidden
+│
+├── K. CANDLE RENDER
+│   │
+│   ├── K1. Retrieve Render Range
+│   ├── K2. Retrieve Candle
+│   ├── K3. Calculate Center X
+│   ├── K4. Convert OHLC → Y
+│   ├── K5. Calculate Body Geometry
+│   ├── K6. Calculate Wick Geometry
+│   ├── K7. Select Style
+│   ├── K8. Update Wick Canvas Item
+│   └── K9. Update Body Canvas Item
+│
+├── L. GRID RENDER
+│   │
+│   ├── L1. Determine Visible Price Range
+│   ├── L2. Determine Price Tick Interval
+│   ├── L3. Convert Price Ticks → Y
+│   ├── L4. Determine Logical Tick Interval
+│   ├── L5. Convert Logical Ticks → X
+│   ├── L6. Reuse Horizontal Grid Items
+│   └── L7. Reuse Vertical Grid Items
+│
+├── M. CROSSHAIR
+│   │
+│   ├── M1. Mouse X → Logical Index
+│   ├── M2. Mouse Y → Price
+│   ├── M3. Find Nearest Candle
+│   ├── M4. Calculate Snapped X
+│   ├── M5. Calculate Snapped Y
+│   ├── M6. Update Vertical Line
+│   ├── M7. Update Horizontal Line
+│   ├── M8. Update Price Label
+│   └── M9. Update Time Label
+│
+├── N. INTERACTION
+│   │
+│   ├── N1. Mouse Press
+│   │   ├── N1.1 Store x
+│   │   ├── N1.2 Store y
+│   │   └── N1.3 Set pan_active
+│   │
+│   ├── N2. Mouse Drag
+│   │   ├── N2.1 Calculate dx
+│   │   ├── N2.2 Convert dx → logical delta
+│   │   ├── N2.3 Update logical position
+│   │   └── N2.4 Request render
+│   │
+│   ├── N3. Mouse Release
+│   │   └── N3.1 Clear pan_active
+│   │
+│   ├── N4. Wheel Zoom
+│   │   ├── N4.1 Normalize wheel delta
+│   │   ├── N4.2 Calculate zoom_scale
+│   │   ├── N4.3 Capture anchor
+│   │   ├── N4.4 Apply zoom
+│   │   └── N4.5 Correct anchor
+│   │
+│   └── N5. Mouse Move
+│       ├── N5.1 Update crosshair position
+│       └── N5.2 Request overlay render
+│
+├── O. INVALIDATION
+│   │
+│   ├── O1. Define dirty flags
+│   ├── O2. Mark data dirty
+│   ├── O3. Mark time scale dirty
+│   ├── O4. Mark price scale dirty
+│   ├── O5. Mark geometry dirty
+│   ├── O6. Mark style dirty
+│   ├── O7. Mark crosshair dirty
+│   └── O8. Merge dirty flags
+│
+├── P. RENDER SCHEDULER
+│   │
+│   ├── P1. Store render_pending
+│   ├── P2. Detect existing scheduled render
+│   ├── P3. Schedule Tkinter callback
+│   ├── P4. Execute render
+│   ├── P5. Clear completed flags
+│   └── P6. Reschedule when new invalidation occurred
+│
+├── Q. DATA UPDATE
+│   │
+│   ├── Q1. Append new candle
+│   ├── Q2. Update existing candle
+│   ├── Q3. Detect high/low change
+│   ├── Q4. Update data count
+│   ├── Q5. Mark affected layers dirty
+│   └── Q6. Schedule render
+│
+├── R. RESIZE
+│   │
+│   ├── R1. Receive width
+│   ├── R2. Receive height
+│   ├── R3. Update viewport dimensions
+│   ├── R4. Recalculate visible count
+│   ├── R5. Recalculate visible_to
+│   ├── R6. Recalculate price-scale height
+│   └── R7. Schedule render
+│
+└── S. DENSITY / CONFLATION
+    │
+    ├── S1. Detect density
+    │   └── S1.1 bar_spacing < 1.0
+    │
+    ├── S2. Detect conflation
+    │   └── S2.1 points_per_pixel > 2.0
+    │
+    ├── S3. Determine aggregation group
+    │
+    ├── S4. Aggregate Open
+    │   └── first.open
+    │
+    ├── S5. Aggregate High
+    │   └── max(high)
+    │
+    ├── S6. Aggregate Low
+    │   └── min(low)
+    │
+    ├── S7. Aggregate Close
+    │   └── last.close
+    │
+    └── S8. Aggregate Volume
+        └── sum(volume)

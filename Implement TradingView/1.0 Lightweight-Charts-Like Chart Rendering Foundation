@@ -1,0 +1,2672 @@
+# TASK:
+
+# Implement TradingView/Lightweight-Charts-Like Chart Rendering Foundation
+
+## Decomposition Tree
+
+```text
+TradingView-like Chart Rendering Foundation
+│
+├── 1. Configure Chart Constants
+│   │
+│   ├── 1.1 Configure horizontal scale constants
+│   │   ├── Set bar_spacing = 6.0 px
+│   │   ├── Set min_bar_spacing = 0.5 px
+│   │   ├── Set max_bar_spacing = unlimited
+│   │   └── Set right_offset = 5–10 bars
+│   │       └── Recommended initial value = 5 bars
+│   │
+│   ├── 1.2 Configure price-scale constants
+│   │   ├── Set price_top_margin = 0.20
+│   │   └── Set price_bottom_margin = 0.10
+│   │
+│   ├── 1.3 Configure candle constants
+│   │   ├── Set wick_width = 1 px
+│   │   ├── Set candle minimum width = 1 px
+│   │   ├── Set candle special-width range = 2.5–4.0 px
+│   │   └── Set special candle width = 3 px
+│   │
+│   ├── 1.4 Configure viewport constants
+│   │   ├── Set visible_from type = float
+│   │   ├── Set visible_to type = float
+│   │   └── Set overscan = 20 bars
+│   │
+│   ├── 1.5 Configure zoom constants
+│   │   ├── Set zoom proportional divisor = 10
+│   │   └── Set zoom change = zoom_scale × bar_spacing / 10
+│   │
+│   ├── 1.6 Configure wheel constants
+│   │   ├── Set wheel_zoom_factor ≈ 0.10
+│   │   └── Set wheel_pan_factor = 1.0–2.0
+│   │
+│   ├── 1.7 Configure rendering constants
+│   │   ├── Set target render interval = 16–30 ms
+│   │   ├── Set scheduler mode = coalesced
+│   │   └── Set rendering = viewport-only
+│   │
+│   ├── 1.8 Configure colors
+│   │   ├── Set bull_color = #26A69A
+│   │   ├── Set bear_color = #EF5350
+│   │   ├── Set bull_wick_color = #26A69A
+│   │   ├── Set bear_wick_color = #EF5350
+│   │   ├── Set grid_color = #D6DCDE
+│   │   ├── Set crosshair_color = #758696
+│   │   └── Set crosshair_label_background = #4C525E
+│   │
+│   └── 1.9 Configure density/conflation constants
+│       ├── Set conflation_threshold = 0.5 px
+│       ├── Set density threshold = 1.0 px
+│       └── Set aggressive conflation factors = 1x, 2x, 4x, 8x
+│
+├── 2. Build Data Layer
+│   │
+│   ├── 2.1 Store OHLCV data
+│   │   ├── Store timestamp
+│   │   ├── Store open
+│   │   ├── Store high
+│   │   ├── Store low
+│   │   ├── Store close
+│   │   └── Store volume
+│   │
+│   ├── 2.2 Maintain logical data index
+│   │   ├── First data point = logical index 0
+│   │   ├── Second data point = logical index 1
+│   │   └── Continue sequentially
+│   │
+│   ├── 2.3 Keep data independent from Canvas
+│   │   ├── Data layer does not calculate Canvas coordinates
+│   │   ├── Data layer does not choose candle colors
+│   │   └── Data layer does not create Canvas objects
+│   │
+│   └── 2.4 Maintain data lookup
+│       ├── Retrieve OHLCV by logical index
+│       ├── Retrieve timestamp by logical index
+│       └── Retrieve visible data without scanning unrelated data
+│
+├── 3. Implement Time Scale
+│   │
+│   ├── 3.1 Store time-scale state
+│   │   ├── Store bar_spacing = 6.0 initially
+│   │   ├── Store min_bar_spacing = 0.5
+│   │   ├── Store max_bar_spacing = unlimited
+│   │   ├── Store logical_position as float
+│   │   └── Store right_offset = 5 bars initially
+│   │
+│   ├── 3.2 Calculate visible bars
+│   │   │
+│   │   ├── Retrieve chart_width
+│   │   ├── Retrieve bar_spacing
+│   │   ├── Calculate visible_bars = chart_width / bar_spacing
+│   │   └── Keep visible_bars as float
+│   │
+│   ├── 3.3 Convert logical index to x
+│   │   │
+│   │   ├── Retrieve logical index
+│   │   ├── Retrieve logical viewport origin
+│   │   ├── Retrieve bar_spacing
+│   │   ├── Calculate logical_delta
+│   │   ├── Calculate x = chart_origin_x + logical_delta × bar_spacing
+│   │   └── Return floating-point x
+│   │
+│   ├── 3.4 Convert x to floating logical index
+│   │   │
+│   │   ├── Retrieve mouse_x
+│   │   ├── Retrieve chart_origin_x
+│   │   ├── Retrieve bar_spacing
+│   │   ├── Calculate pixel_delta = mouse_x - chart_origin_x
+│   │   ├── Calculate logical_delta = pixel_delta / bar_spacing
+│   │   └── Return float logical index
+│   │
+│   ├── 3.5 Pan by pixels
+│   │   │
+│   │   ├── Receive mouse_dx
+│   │   ├── Retrieve bar_spacing
+│   │   ├── Calculate logical_delta = mouse_dx / bar_spacing
+│   │   ├── Preserve fractional logical_delta
+│   │   ├── Update logical_position
+│   │   └── Do not round logical_position
+│   │
+│   ├── 3.6 Clamp minimum spacing
+│   │   ├── Receive requested spacing
+│   │   ├── Compare requested spacing with 0.5
+│   │   ├── If requested < 0.5:
+│   │   │   └── Use 0.5
+│   │   └── Otherwise use requested value
+│   │
+│   ├── 3.7 Apply proportional zoom
+│   │   │
+│   │   ├── Retrieve current bar_spacing
+│   │   ├── Retrieve zoom_scale
+│   │   ├── Calculate spacing_delta =
+│   │   │       zoom_scale × current_bar_spacing / 10
+│   │   ├── Calculate new_spacing =
+│   │   │       current_bar_spacing + spacing_delta
+│   │   ├── Clamp new_spacing >= 0.5
+│   │   └── Apply new_spacing
+│   │
+│   └── 3.8 Maintain continuous logical coordinates
+│       ├── Allow logical_position to be fractional
+│       ├── Allow visible_from to be fractional
+│       ├── Allow visible_to to be fractional
+│       └── Never round during pan or zoom
+│
+├── 4. Implement Cursor-Centered Zoom
+│   │
+│   ├── 4.1 Capture zoom point
+│   │   ├── Receive mouse_x
+│   │   └── Treat mouse_x as zoom anchor
+│   │
+│   ├── 4.2 Convert zoom point to logical coordinate
+│   │   ├── Retrieve mouse_x
+│   │   ├── Retrieve current bar_spacing
+│   │   ├── Convert mouse_x → float logical index
+│   │   └── Store zoom_anchor_logical
+│   │
+│   ├── 4.3 Change bar spacing
+│   │   ├── Retrieve current bar_spacing
+│   │   ├── Retrieve zoom_scale
+│   │   ├── Calculate delta = zoom_scale × bar_spacing / 10
+│   │   ├── Calculate new_spacing = bar_spacing + delta
+│   │   └── Clamp new_spacing >= 0.5
+│   │
+│   ├── 4.4 Restore cursor logical position
+│   │   ├── Keep zoom_anchor_logical unchanged
+│   │   ├── Recalculate viewport after zoom
+│   │   ├── Calculate x of zoom_anchor_logical
+│   │   ├── Compare calculated x with original mouse_x
+│   │   ├── Calculate viewport correction
+│   │   └── Apply correction to logical viewport position
+│   │
+│   └── 4.5 Complete zoom
+│       ├── Preserve same logical data point under cursor
+│       ├── Update visible range
+│       ├── Mark time scale dirty
+│       └── Schedule render
+│
+├── 5. Implement Viewport
+│   │
+│   ├── 5.1 Store viewport state
+│   │   ├── Store visible_from : float
+│   │   ├── Store visible_to : float
+│   │   ├── Store overscan = 20
+│   │   ├── Store chart_width
+│   │   └── Store chart_height
+│   │
+│   ├── 5.2 Calculate visible_from
+│   │   ├── Retrieve logical viewport origin
+│   │   └── Store fractional visible_from
+│   │
+│   ├── 5.3 Calculate visible_to
+│   │   ├── Retrieve visible_from
+│   │   ├── Retrieve chart_width
+│   │   ├── Retrieve bar_spacing
+│   │   ├── Calculate visible_bars = width / spacing
+│   │   └── Calculate visible_to = visible_from + visible_bars
+│   │
+│   ├── 5.4 Convert visible range to rendering indices
+│   │   ├── Calculate first = floor(visible_from)
+│   │   ├── Calculate last = ceil(visible_to)
+│   │   ├── Subtract overscan = 20 from first
+│   │   ├── Add overscan = 20 to last
+│   │   ├── Clamp first >= 0
+│   │   └── Clamp last <= data_count - 1
+│   │
+│   ├── 5.5 Detect viewport changes
+│   │   ├── Compare old visible_from with new visible_from
+│   │   ├── Compare old visible_to with new visible_to
+│   │   ├── Compare old chart dimensions with new dimensions
+│   │   └── Mark viewport dirty when changed
+│   │
+│   └── 5.6 Return visible range
+│       ├── Return visible_from
+│       ├── Return visible_to
+│       ├── Return render_first
+│       └── Return render_last
+│
+├── 6. Implement Candle Width Calculation
+│   │
+│   ├── 6.1 Receive bar spacing
+│   │
+│   ├── 6.2 Handle spacing <= 4 px
+│   │   ├── If 2.5 <= spacing <= 4.0:
+│   │   │   └── Set candle_width = 3 px
+│   │   └── Do not use generic 80% formula in this range
+│   │
+│   ├── 6.3 Handle spacing > 4 px
+│   │   ├── Calculate atan_component =
+│   │   │   atan(max(4, spacing) - 4)
+│   │   ├── Calculate normalized_component =
+│   │   │   atan_component / (π × 0.5)
+│   │   ├── Calculate coefficient =
+│   │   │   1 - 0.2 × normalized_component
+│   │   ├── Calculate width =
+│   │   │   floor(spacing × coefficient)
+│   │   └── Limit width <= floor(spacing)
+│   │
+│   ├── 6.4 Handle very small spacing
+│   │   ├── Calculate minimum width = 1 px
+│   │   └── If calculated width < 1:
+│   │       └── Use 1 px
+│   │
+│   ├── 6.5 Apply pixel ratio
+│   │   ├── Retrieve pixel_ratio
+│   │   ├── Calculate pixel_width = floor(width × pixel_ratio)
+│   │   └── Convert back to logical pixel representation if required
+│   │
+│   └── 6.6 Maintain wick/body parity
+│       ├── Retrieve wick_width = 1 px
+│       ├── Compare candle width parity with wick width parity
+│       ├── Adjust body width when required
+│       └── Return final candle width
+│
+├── 7. Implement Wick Width
+│   │
+│   ├── 7.1 Retrieve pixel_ratio
+│   ├── 7.2 Calculate wick_width = floor(pixel_ratio)
+│   ├── 7.3 Ensure minimum wick width = 1 px
+│   └── 7.4 Cache wick_width until pixel_ratio changes
+│
+├── 8. Implement Price Scale
+│   │
+│   ├── 8.1 Configure price margins
+│   │   ├── top_margin = 20%
+│   │   └── bottom_margin = 10%
+│   │
+│   ├── 8.2 Determine visible price range
+│   │   ├── Retrieve visible candles
+│   │   ├── Retrieve high values
+│   │   ├── Retrieve low values
+│   │   ├── Determine visible_low
+│   │   └── Determine visible_high
+│   │
+│   ├── 8.3 Calculate usable price-scale height
+│   │   ├── Retrieve chart_height
+│   │   ├── Calculate top_reserved = height × 0.20
+│   │   ├── Calculate bottom_reserved = height × 0.10
+│   │   └── Calculate data_height =
+│   │       height - top_reserved - bottom_reserved
+│   │
+│   ├── 8.4 Convert price to y
+│   │   ├── Retrieve price
+│   │   ├── Retrieve visible_low
+│   │   ├── Retrieve visible_high
+│   │   ├── Calculate normalized_price
+│   │   ├── Calculate y within data_height
+│   │   └── Apply top margin
+│   │
+│   └── 8.5 Cache price transformation
+│       ├── Cache visible_low
+│       ├── Cache visible_high
+│       ├── Cache data_height
+│       ├── Cache top_offset
+│       └── Recalculate only when price range or chart height changes
+│
+├── 9. Implement Candle Geometry
+│   │
+│   ├── 9.1 Retrieve candle OHLC
+│   │   ├── Retrieve open
+│   │   ├── Retrieve high
+│   │   ├── Retrieve low
+│   │   └── Retrieve close
+│   │
+│   ├── 9.2 Calculate candle center x
+│   │   ├── Retrieve logical index
+│   │   ├── Convert logical index → x
+│   │   └── Store center_x
+│   │
+│   ├── 9.3 Calculate body width
+│   │   ├── Retrieve cached candle_width
+│   │   ├── Calculate half_width = candle_width / 2
+│   │   ├── Calculate body_left = center_x - half_width
+│   │   └── Calculate body_right = center_x + half_width
+│   │
+│   ├── 9.4 Calculate OHLC y coordinates
+│   │   ├── Convert open → open_y
+│   │   ├── Convert high → high_y
+│   │   ├── Convert low → low_y
+│   │   └── Convert close → close_y
+│   │
+│   ├── 9.5 Calculate body vertical bounds
+│   │   ├── body_top = min(open_y, close_y)
+│   │   └── body_bottom = max(open_y, close_y)
+│   │
+│   ├── 9.6 Handle zero-height body
+│   │   ├── If open_y == close_y:
+│   │   ├── Ensure body height is at least 1 px
+│   │   └── Preserve the actual price location
+│   │
+│   └── 9.7 Calculate wick geometry
+│       ├── wick_x = center_x
+│       ├── wick_top = high_y
+│       └── wick_bottom = low_y
+│
+├── 10. Determine Candle State
+│   │
+│   ├── 10.1 Determine bullish state
+│   │   ├── If close > open:
+│   │   │   └── state = BULL
+│   │   └── Use bull color
+│   │
+│   ├── 10.2 Determine bearish state
+│   │   ├── If close < open:
+│   │   │   └── state = BEAR
+│   │   └── Use bear color
+│   │
+│   └── 10.3 Determine neutral state
+│       ├── If close == open:
+│       │   └── state = NEUTRAL
+│       └── Use neutral wick color = #737375
+│
+├── 11. Determine Candle Style
+│   │
+│   ├── 11.1 Bull style
+│   │   ├── body_color = #26A69A
+│   │   ├── wick_color = #26A69A
+│   │   └── border_color = #26A69A or disabled
+│   │
+│   ├── 11.2 Bear style
+│   │   ├── body_color = #EF5350
+│   │   ├── wick_color = #EF5350
+│   │   └── border_color = #EF5350 or disabled
+│   │
+│   └── 11.3 Neutral style
+│       ├── wick_color = #737375
+│       └── body style follows selected neutral policy
+│
+├── 12. Implement Candle Renderer
+│   │
+│   ├── 12.1 Request visible candle range
+│   │   ├── Retrieve render_first
+│   │   └── Retrieve render_last
+│   │
+│   ├── 12.2 Iterate only visible + overscan candles
+│   │   ├── Start at render_first
+│   │   ├── End at render_last
+│   │   └── Never iterate complete dataset during normal redraw
+│   │
+│   ├── 12.3 Retrieve candle data
+│   │   ├── Retrieve OHLC
+│   │   └── Do not recalculate unrelated indicators
+│   │
+│   ├── 12.4 Calculate geometry
+│   │   ├── Retrieve center_x
+│   │   ├── Retrieve candle_width
+│   │   ├── Retrieve OHLC y values
+│   │   └── Build body/wick geometry
+│   │
+│   ├── 12.5 Retrieve style
+│   │   ├── Determine bull/bear/neutral
+│   │   └── Retrieve cached colors
+│   │
+│   ├── 12.6 Draw wick
+│   │   ├── Use Canvas line primitive
+│   │   ├── x1 = center_x
+│   │   ├── y1 = high_y
+│   │   ├── x2 = center_x
+│   │   ├── y2 = low_y
+│   │   └── width = 1 px
+│   │
+│   ├── 12.7 Draw body
+│   │   ├── Use Canvas rectangle primitive
+│   │   ├── left = body_left
+│   │   ├── top = body_top
+│   │   ├── right = body_right
+│   │   ├── bottom = body_bottom
+│   │   └── fill = selected body color
+│   │
+│   └── 12.8 Reuse Canvas items
+│       ├── Keep candle Canvas IDs
+│       ├── Update existing item coordinates
+│       ├── Update existing item style
+│       ├── Create new items only when visible count increases
+│       └── Hide unused items instead of deleting them during normal viewport movement
+│
+├── 13. Implement Canvas Item Pool
+│   │
+│   ├── 13.1 Create wick item pool
+│   │   ├── Maintain reusable Canvas line IDs
+│   │   └── Allocate only when pool is insufficient
+│   │
+│   ├── 13.2 Create body item pool
+│   │   ├── Maintain reusable Canvas rectangle IDs
+│   │   └── Allocate only when pool is insufficient
+│   │
+│   ├── 13.3 Bind visible candle to Canvas item
+│   │   ├── Assign candle index
+│   │   ├── Assign wick Canvas ID
+│   │   └── Assign body Canvas ID
+│   │
+│   ├── 13.4 Update Canvas items
+│   │   ├── Update coordinates
+│   │   ├── Update fill
+│   │   ├── Update outline when enabled
+│   │   └── Keep Canvas object alive
+│   │
+│   └── 13.5 Hide unused Canvas items
+│       ├── Determine pool items beyond visible range
+│       ├── Set state = hidden
+│       └── Do not destroy them during ordinary rendering
+│
+├── 14. Implement Grid Renderer
+│   │
+│   ├── 14.1 Configure grid style
+│   │   ├── grid_color = #D6DCDE
+│   │   └── grid visibility = true
+│   │
+│   ├── 14.2 Calculate vertical price grid lines
+│   │   ├── Retrieve visible price range
+│   │   ├── Determine price tick interval
+│   │   ├── Convert tick prices → y
+│   │   └── Draw only visible grid lines
+│   │
+│   ├── 14.3 Calculate horizontal time grid lines
+│   │   ├── Retrieve visible logical range
+│   │   ├── Determine suitable logical interval
+│   │   ├── Convert logical positions → x
+│   │   └── Draw only visible grid lines
+│   │
+│   └── 14.4 Cache grid geometry
+│       ├── Cache until viewport changes
+│       ├── Cache until price range changes
+│       └── Avoid recalculating unchanged grid geometry
+│
+├── 15. Implement Crosshair Overlay
+│   │
+│   ├── 15.1 Configure crosshair
+│   │   ├── mode = Magnet
+│   │   ├── color = #758696
+│   │   ├── width = 1 px
+│   │   ├── style = LargeDashed
+│   │   ├── visible = true
+│   │   ├── label_visible = true
+│   │   └── label_background = #4C525E
+│   │
+│   ├── 15.2 Process mouse position
+│   │   ├── Receive mouse_x
+│   │   ├── Receive mouse_y
+│   │   ├── Convert x → float logical index
+│   │   └── Convert y → price
+│   │
+│   ├── 15.3 Apply magnet behavior
+│   │   ├── Determine nearest relevant candle/data point
+│   │   ├── Determine snapped logical position
+│   │   └── Determine snapped price when applicable
+│   │
+│   ├── 15.4 Update vertical crosshair
+│   │   ├── Calculate x
+│   │   └── Update existing Canvas line
+│   │
+│   ├── 15.5 Update horizontal crosshair
+│   │   ├── Calculate y
+│   │   └── Update existing Canvas line
+│   │
+│   └── 15.6 Update labels
+│       ├── Calculate time label
+│       ├── Calculate price label
+│       ├── Update existing Canvas text/background items
+│       └── Do not redraw candles
+│
+├── 16. Implement Interaction Manager
+│   │
+│   ├── 16.1 Handle mouse press
+│   │   ├── Store mouse_x
+│   │   ├── Store mouse_y
+│   │   ├── Store logical_position
+│   │   └── Set pan_active = true
+│   │
+│   ├── 16.2 Handle mouse drag
+│   │   ├── Calculate dx = current_x - previous_x
+│   │   ├── Calculate logical_delta = dx / bar_spacing
+│   │   ├── Update logical_position using float
+│   │   ├── Update previous_x
+│   │   ├── Update viewport
+│   │   └── Invalidate chart
+│   │
+│   ├── 16.3 Handle mouse release
+│   │   ├── Set pan_active = false
+│   │   └── Finalize viewport state
+│   │
+│   ├── 16.4 Handle wheel zoom
+│   │   ├── Receive wheel event
+│   │   ├── Normalize delta
+│   │   ├── Convert cursor x → logical index
+│   │   ├── Calculate proportional zoom
+│   │   ├── Apply minimum spacing = 0.5
+│   │   ├── Restore cursor logical position
+│   │   └── Invalidate chart
+│   │
+│   ├── 16.5 Handle horizontal wheel movement
+│   │   ├── Read deltaX
+│   │   ├── Multiply by wheel_pan_factor = 1.0–2.0
+│   │   ├── Convert pixels → logical movement
+│   │   └── Update viewport
+│   │
+│   └── 16.6 Handle mouse movement
+│       ├── Update crosshair state
+│       ├── Do not render candles directly
+│       └── Invalidate overlay
+│
+├── 17. Implement Render Invalidation
+│   │
+│   ├── 17.1 Define dirty flags
+│   │   ├── DATA_DIRTY
+│   │   ├── TIME_SCALE_DIRTY
+│   │   ├── PRICE_SCALE_DIRTY
+│   │   ├── GEOMETRY_DIRTY
+│   │   ├── STYLE_DIRTY
+│   │   ├── CROSSHAIR_DIRTY
+│   │   └── FULL_RENDER_DIRTY
+│   │
+│   ├── 17.2 Mark affected layers dirty
+│   │   ├── Data update → DATA_DIRTY
+│   │   ├── Pan → TIME_SCALE_DIRTY + GEOMETRY_DIRTY
+│   │   ├── Zoom → TIME_SCALE_DIRTY + GEOMETRY_DIRTY + PRICE_SCALE_DIRTY
+│   │   ├── Resize → all geometry-related flags
+│   │   ├── Style change → STYLE_DIRTY
+│   │   └── Crosshair move → CROSSHAIR_DIRTY
+│   │
+│   └── 17.3 Merge multiple invalidations
+│       ├── If render already scheduled:
+│       │   └── Do not schedule another render
+│       └── Keep all dirty flags until scheduled render executes
+│
+├── 18. Implement Render Scheduler
+│   │
+│   ├── 18.1 Receive invalidation
+│   ├── 18.2 Check render_pending
+│   │   ├── If true:
+│   │   │   └── Return without scheduling another render
+│   │   └── If false:
+│   │       └── Continue
+│   │
+│   ├── 18.3 Schedule deferred render
+│   │   ├── Use Tkinter after_idle or controlled after()
+│   │   ├── Target interval = 16–30 ms
+│   │   └── Set render_pending = true
+│   │
+│   ├── 18.4 Execute render
+│   │   ├── Set render_pending = false
+│   │   ├── Read dirty flags
+│   │   ├── Update required transformations
+│   │   ├── Render required layers
+│   │   └── Clear completed dirty flags
+│   │
+│   └── 18.5 Reschedule if invalidated during render
+│       ├── Check dirty flags after render
+│       ├── If dirty:
+│       │   └── Schedule another render
+│       └── Otherwise stop
+│
+├── 19. Implement Visible-Only Rendering
+│   │
+│   ├── 19.1 Retrieve visible_from
+│   ├── 19.2 Retrieve visible_to
+│   ├── 19.3 Calculate first = floor(visible_from) - 20
+│   ├── 19.4 Calculate last = ceil(visible_to) + 20
+│   ├── 19.5 Clamp first >= 0
+│   ├── 19.6 Clamp last <= data_count - 1
+│   └── 19.7 Render only first..last
+│
+├── 20. Implement Density-Aware Rendering
+│   │
+│   ├── 20.1 Detect normal density
+│   │   ├── If bar_spacing >= 1.0 px:
+│   │   │   └── Use normal candle renderer
+│   │
+│   ├── 20.2 Detect dense candle state
+│   │   ├── If bar_spacing < 1.0 px:
+│   │   │   └── Enter density-aware rendering
+│   │
+│   ├── 20.3 Detect conflation requirement
+│   │   ├── If data points occupy < 0.5 px:
+│   │   │   └── Mark aggregation/conflation candidate
+│   │
+│   ├── 20.4 Calculate aggregation group
+│   │   ├── Determine number of data points represented by screen region
+│   │   ├── Group consecutive OHLCV records
+│   │   └── Preserve temporal ordering
+│   │
+│   ├── 20.5 Aggregate OHLCV
+│   │   ├── aggregated_open = first.open
+│   │   ├── aggregated_high = max(all.high)
+│   │   ├── aggregated_low = min(all.low)
+│   │   ├── aggregated_close = last.close
+│   │   └── aggregated_volume = sum(all.volume)
+│   │
+│   └── 20.6 Select conflation factor
+│       ├── 1x = normal
+│       ├── 2x = moderate
+│       ├── 4x = strong
+│       └── 8x+ = aggressive
+│
+├── 21. Implement Live/Right-Offset Behavior
+│   │
+│   ├── 21.1 Configure right offset
+│   │   ├── Default = 5 bars
+│   │   └── Allowed recommendation range = 5–10 bars
+│   │
+│   ├── 21.2 Calculate latest candle position
+│   │   ├── Retrieve last logical index
+│   │   └── Add right_offset
+│   │
+│   ├── 21.3 Maintain future space
+│   │   ├── Keep latest candle left of chart edge
+│   │   └── Preserve 5-bar empty region initially
+│   │
+│   └── 21.4 Handle new live candle
+│       ├── Add/update last candle
+│       ├── Preserve right offset when chart is following latest data
+│       └── Do not force viewport movement when user has manually scrolled away
+│
+22. Implement Incremental Data Update Architecture
+│
+├── 22.1 Define three runtime update classes
+│   │
+│   ├── CURRENT_BAR_UPDATE
+│   │   ├── Existing latest logical index
+│   │   ├── Replace/update OHLCV values
+│   │   ├── Recalculate only affected candle geometry
+│   │   ├── Recalculate dependent indicators for latest bar only
+│   │   ├── Recalculate price scale only if required
+│   │   ├── Do not reconstruct historical candles
+│   │   └── Preserve viewport unless price-scale change requires adjustment
+│   │
+│   ├── NEW_BAR_APPEND
+│   │   ├── Append one new logical index
+│   │   ├── Add new OHLCV record
+│   │   ├── Update data_count
+│   │   ├── Calculate new candle geometry
+│   │   ├── Calculate dependent indicator values for new bar
+│   │   ├── If following latest:
+│   │   │   └── Shift viewport according to right_offset
+│   │   ├── If user has manually scrolled away:
+│   │   │   └── Do not move viewport
+│   │   └── Reuse/allocate only required Canvas slot
+│   │
+│   └── HISTORICAL_DATA_UPDATE
+│       ├── Identify affected logical indices
+│       ├── Update only affected OHLCV records
+│       ├── Invalidate affected candle geometry
+│       ├── Recalculate dependent indicators whose dependency range
+│       │   intersects affected indices
+│       ├── Recalculate price scale if visible range is affected
+│       ├── Preserve viewport unless explicitly required
+│       └── Selectively redraw affected region
+│
+├── 22.2 Identify update by timestamp/logical index
+│   │
+│   ├── Compare incoming timestamp with latest timestamp
+│   ├── If same timestamp:
+│   │   └── CURRENT_BAR_UPDATE
+│   ├── If timestamp is newer:
+│   │   └── NEW_BAR_APPEND
+│   └── If timestamp targets an older record:
+│       └── HISTORICAL_DATA_UPDATE
+│
+├── 22.3 Maintain update scope
+│   │
+│   ├── Store affected_first_index
+│   ├── Store affected_last_index
+│   ├── Store update_type
+│   └── Store whether viewport is affected
+│
+├── 22.4 Propagate incremental invalidation
+│   │
+│   ├── CURRENT_BAR_UPDATE
+│   │   ├── DATA_DIRTY
+│   │   ├── CANDLE_GEOMETRY_DIRTY(latest_index)
+│   │   ├── INDICATOR_DIRTY(latest_index)
+│   │   └── PRICE_SCALE_DIRTY only if required
+│   │
+│   ├── NEW_BAR_APPEND
+│   │   ├── DATA_DIRTY
+│   │   ├── CANDLE_APPEND_DIRTY
+│   │   ├── INDICATOR_DIRTY(new_index)
+│   │   └── TIME_SCALE_DIRTY only when follow-latest shifts viewport
+│   │
+│   └── HISTORICAL_DATA_UPDATE
+│       ├── DATA_DIRTY
+│       ├── CANDLE_GEOMETRY_DIRTY(affected range)
+│       ├── INDICATOR_DIRTY(dependent range)
+│       └── PRICE_SCALE_DIRTY when visible extrema may change
+│
+├── 22.5 Preserve historical rendering state
+│   │
+│   ├── Historical candles remain intact during current-bar updates
+│   ├── Historical candle Canvas items are not reconstructed
+│   ├── Historical indicator values are not recalculated unnecessarily
+│   └── Historical geometry cache remains valid
+│
+└── 22.6 Enforce incremental rendering contract
+|    │
+|    ├── Current bar → update existing Canvas slot
+|    ├── New bar → append/reuse one Canvas slot
+|    ├── Historical change → update affected slots only
+|    └── Full render only for explicit FULL_RENDER_DIRTY conditions
+│
+├── 23. Implement Resize Handling
+│   │
+│   ├── 23.1 Receive Canvas width change
+│   ├── 23.2 Receive Canvas height change
+│   ├── 23.3 Update viewport dimensions
+│   ├── 23.4 Recalculate visible_bars = width / bar_spacing
+│   ├── 23.5 Recalculate visible_to
+│   ├── 23.6 Recalculate price-scale data height
+│   ├── 23.7 Recalculate candle positions
+│   └── 23.8 Schedule render
+│
+└── 24. Validate Rendering Performance
+    │
+    ├── 24.1 Validate crosshair movement
+    │   └── Target <16–30 ms
+    │
+    ├── 24.2 Validate pan
+    │   └── Target <16–30 ms
+    │
+    ├── 24.3 Validate zoom
+    │   └── Target <16–30 ms
+    │
+    ├── 24.4 Validate normal redraw
+    │   └── Target <16–30 ms
+    │
+    ├── 24.5 Detect sluggish interaction
+    │   ├── 50–100 ms = noticeable delay
+    │   ├── 100–200 ms = clearly sluggish
+    │   └── >500 ms = unacceptable freeze
+    │
+    ├── 24.6 Verify no full-dataset rendering
+    │   └── Normal viewport render processes only visible + 20 overscan
+    │
+    ├── 24.7 Verify Canvas reuse
+    │   └── Existing Canvas items are updated rather than recreated
+    │
+    └── 24.8 Verify render coalescing
+        ├── Multiple mouse events before frame
+        └── Produce one scheduled render
+```
+
+# DETAILED IMPLEMENTATION SPECIFICATION
+
+## 1. Configure Chart Constants
+
+### Task
+
+Configure every fixed chart-rendering parameter in one centralized configuration.
+
+### Purpose
+
+Prevent rendering algorithms from containing unexplained numeric literals.
+
+### Inputs
+
+* None at runtime for initial configuration.
+
+### Outputs
+
+A chart configuration containing:
+
+| Parameter                    |     Value | Classification             |
+| ---------------------------- | --------: | -------------------------- |
+| `bar_spacing`                |  `6.0 px` | Initial horizontal spacing |
+| `min_bar_spacing`            |  `0.5 px` | Lower bound                |
+| `max_bar_spacing`            | Unlimited | Upper bound                |
+| `right_offset`               |  `5 bars` | Recommended initial value  |
+| `price_top_margin`           |    `0.20` | Official default           |
+| `price_bottom_margin`        |    `0.10` | Official default           |
+| `wick_width`                 |    `1 px` | Initial implementation     |
+| `candle_special_min`         |  `2.5 px` | Width regime               |
+| `candle_special_max`         |  `4.0 px` | Width regime               |
+| `candle_special_width`       |    `3 px` | Width regime               |
+| `overscan`                   | `20 bars` | Recommended                |
+| `zoom_divisor`               |      `10` | Proportional zoom          |
+| `wheel_zoom_factor`          |    `0.10` | Recommended                |
+| `wheel_pan_factor`           | `1.0–2.0` | Recommended                |
+| `conflation_threshold`       |  `0.5 px` | Density threshold          |
+| `density_threshold`          |  `1.0 px` | Density-mode threshold     |
+| `bull_color`                 | `#26A69A` | Official                   |
+| `bear_color`                 | `#EF5350` | Official                   |
+| `bull_wick_color`            | `#26A69A` | Official                   |
+| `bear_wick_color`            | `#EF5350` | Official                   |
+| `neutral_wick_color`         | `#737375` | Source behavior            |
+| `grid_color`                 | `#D6DCDE` | Official                   |
+| `crosshair_color`            | `#758696` | Official                   |
+| `crosshair_label_background` | `#4C525E` | Official                   |
+
+### Performance considerations
+
+* Constants must not be recalculated inside candle loops.
+* Candle width constants should be read once per rendering pass.
+* Colors should be immutable/shared values.
+* `wick_width` should be cached until device pixel ratio changes.
+
+### Boundary conditions
+
+* `bar_spacing < 0.5` must be clamped.
+* `bar_spacing` must remain finite and positive.
+* `overscan` must never produce an index outside the data array.
+
+### Completion criteria
+
+All rendering components obtain their configuration from the centralized chart configuration rather than defining their own numeric constants.
+
+---
+
+# 2. Implement Data Layer
+
+### Task
+
+Provide indexed OHLCV data independently from rendering.
+
+### Purpose
+
+Make rendering consume data without knowing how the data was acquired.
+
+### Inputs
+
+```text
+timestamp
+open
+high
+low
+close
+volume
+```
+
+### Outputs
+
+Indexed candle records.
+
+### Steps
+
+1. Store candles in sequential logical order.
+2. Assign logical index `0` to the first candle.
+3. Assign logical index `1` to the second candle.
+4. Continue sequentially.
+5. Allow renderer to retrieve candle by logical index.
+6. Keep timestamps independent from x coordinates.
+7. Keep prices independent from y coordinates.
+
+### Performance considerations
+
+* Do not scan the entire dataset for every frame.
+* Use direct indexed access.
+* Do not convert timestamps to x coordinates inside the data layer.
+* Do not calculate price-to-y inside the data layer.
+
+### Boundary conditions
+
+* Empty dataset.
+* One candle.
+* Logical index below `0`.
+* Logical index above `data_count - 1`.
+* Missing/invalid OHLC values.
+* `high < low`.
+* `open` or `close` outside `[low, high]`.
+
+### Completion criteria
+
+The renderer can request candle `N` and receive its OHLCV record without performing data transformation.
+
+---
+
+# 3. Implement Time Scale
+
+## 3.1 Store Time-Scale State
+
+### Task
+
+Maintain the horizontal coordinate system.
+
+### State
+
+```text
+bar_spacing = 6.0
+min_bar_spacing = 0.5
+max_bar_spacing = unlimited
+logical_position = float
+right_offset = 5
+```
+
+### Critical rule
+
+`logical_position` is always floating point.
+
+Examples:
+
+```text
+0.0
+0.25
+10.5
+105.73
+-4.25
+```
+
+Do not convert it to integer during interaction.
+
+---
+
+## 3.2 Calculate Visible Bars
+
+### Formula
+
+```text
+visible_bars = chart_width / bar_spacing
+```
+
+Example:
+
+```text
+chart_width = 1200 px
+bar_spacing = 6 px
+
+visible_bars = 1200 / 6
+             = 200 bars
+```
+
+At:
+
+```text
+bar_spacing = 12 px
+```
+
+```text
+visible_bars = 1200 / 12
+             = 100 bars
+```
+
+### Completion criteria
+
+Changing `bar_spacing` automatically changes the number of visible logical bars without changing the underlying data.
+
+---
+
+# 4. Implement Logical ↔ Pixel Conversion
+
+## 4.1 Logical Index → X
+
+### Inputs
+
+```text
+logical_index
+viewport_origin
+bar_spacing
+chart_origin_x
+```
+
+### Transformation
+
+```text
+logical_delta = logical_index - viewport_origin
+
+x = chart_origin_x + logical_delta × bar_spacing
+```
+
+### Output
+
+Floating-point x coordinate.
+
+### Boundary condition
+
+Never round the logical coordinate before calculating x.
+
+---
+
+## 4.2 X → Floating Logical Index
+
+### Inputs
+
+```text
+mouse_x
+chart_origin_x
+bar_spacing
+viewport_origin
+```
+
+### Transformation
+
+```text
+pixel_delta = mouse_x - chart_origin_x
+
+logical_delta = pixel_delta / bar_spacing
+
+logical_index = viewport_origin + logical_delta
+```
+
+### Example
+
+```text
+mouse_x = 730
+chart_origin_x = 0
+bar_spacing = 6
+
+logical_index = 730 / 6
+              = 121.666...
+```
+
+That fractional value must be preserved.
+
+---
+
+# 5. Implement Pan
+
+### Task
+
+Move the chart horizontally according to mouse movement.
+
+### Formula
+
+```text
+logical_delta = pixel_delta / bar_spacing
+```
+
+### Example
+
+```text
+mouse movement = 60 px
+bar_spacing = 6 px
+
+logical_delta = 60 / 6
+              = 10 bars
+```
+
+At:
+
+```text
+bar_spacing = 12 px
+```
+
+```text
+logical_delta = 60 / 12
+              = 5 bars
+```
+
+### Steps
+
+1. Receive current mouse x.
+2. Retrieve previous mouse x.
+3. Calculate `pixel_delta`.
+4. Retrieve `bar_spacing`.
+5. Divide pixel delta by bar spacing.
+6. Update floating logical position.
+7. Recalculate visible range.
+8. Invalidate time-scale geometry.
+9. Schedule rendering.
+
+### Must not happen
+
+```text
+round(logical_delta)
+```
+
+during dragging.
+
+---
+
+# 6. Implement Proportional Zoom
+
+### Task
+
+Change horizontal density proportionally to current spacing.
+
+### Formula
+
+```text
+spacing_delta =
+    zoom_scale × current_bar_spacing / 10
+
+new_bar_spacing =
+    current_bar_spacing + spacing_delta
+```
+
+### Example
+
+For:
+
+```text
+bar_spacing = 5
+zoom_scale = 1
+```
+
+```text
+delta = 5 / 10
+      = 0.5
+
+new spacing = 5.5
+```
+
+For:
+
+```text
+bar_spacing = 20
+zoom_scale = 1
+```
+
+```text
+delta = 20 / 10
+      = 2
+
+new spacing = 22
+```
+
+### Boundary
+
+```text
+new_spacing >= 0.5
+```
+
+If:
+
+```text
+new_spacing < 0.5
+```
+
+use:
+
+```text
+new_spacing = 0.5
+```
+
+### Performance
+
+Do not rebuild the entire data model during zoom.
+
+Zoom changes:
+
+```text
+viewport
+time scale
+geometry
+```
+
+It does not change OHLCV data.
+
+---
+
+# 7. Implement Cursor-Centered Zoom
+
+### Task
+
+Keep the logical data position underneath the mouse cursor fixed while changing zoom.
+
+### Required sequence
+
+```text
+mouse_x
+   ↓
+x → floating logical index
+   ↓
+store anchor
+   ↓
+change bar_spacing
+   ↓
+recalculate viewport
+   ↓
+restore anchor at mouse_x
+```
+
+### Steps
+
+1. Receive `mouse_x`.
+2. Convert `mouse_x` to `zoom_anchor_logical`.
+3. Store the anchor as a float.
+4. Calculate new bar spacing.
+5. Recalculate visible range.
+6. Convert `zoom_anchor_logical` back to x.
+7. Compare resulting x with original mouse x.
+8. Calculate x correction.
+9. Convert correction into logical correction.
+10. Adjust viewport.
+11. Recalculate visible range.
+12. Schedule rendering.
+
+### Completion criteria
+
+Place the mouse over a particular candle.
+
+Zoom repeatedly.
+
+That candle remains underneath the cursor rather than moving toward the chart center.
+
+---
+
+# 8. Implement Viewport
+
+### State
+
+```text
+visible_from : float
+visible_to : float
+overscan = 20
+```
+
+### Visible range
+
+```text
+visible_bars = chart_width / bar_spacing
+
+visible_to =
+    visible_from + visible_bars
+```
+
+### Render range
+
+```text
+render_first =
+    floor(visible_from) - 20
+
+render_last =
+    ceil(visible_to) + 20
+```
+
+Then:
+
+```text
+render_first = max(render_first, 0)
+
+render_last =
+    min(render_last, data_count - 1)
+```
+
+### Important distinction
+
+Do not confuse:
+
+```text
+visible_from
+visible_to
+```
+
+with:
+
+```text
+render_first
+render_last
+```
+
+The first pair describes the actual viewport.
+
+The second pair describes the viewport plus overscan.
+
+---
+
+# 9. Implement Candle Width
+
+### Task
+
+Calculate body width from bar spacing.
+
+### Inputs
+
+```text
+bar_spacing
+pixel_ratio
+wick_width
+```
+
+### Regime 1: 2.5–4 px
+
+If:
+
+```text
+2.5 <= bar_spacing <= 4.0
+```
+
+use:
+
+```text
+candle_width = 3 px
+```
+
+Do not apply the general formula in this range.
+
+### Regime 2: larger spacing
+
+Calculate:
+
+```text
+angle =
+    atan(max(4, bar_spacing) - 4)
+```
+
+Then:
+
+```text
+normalized =
+    angle / (π × 0.5)
+```
+
+Then:
+
+```text
+coefficient =
+    1 - 0.2 × normalized
+```
+
+Then:
+
+```text
+width =
+    floor(bar_spacing × coefficient)
+```
+
+Then:
+
+```text
+width =
+    min(width, floor(bar_spacing))
+```
+
+Then:
+
+```text
+width =
+    max(width, 1)
+```
+
+### Result
+
+At larger spacing the body approaches approximately:
+
+```text
+80% of bar spacing
+```
+
+while at small spacing it deliberately becomes denser.
+
+---
+
+# 10. Implement Wick Geometry
+
+### Inputs
+
+```text
+center_x
+high_y
+low_y
+wick_width = 1
+```
+
+### Geometry
+
+```text
+x1 = center_x
+y1 = high_y
+
+x2 = center_x
+y2 = low_y
+```
+
+### Canvas operation
+
+Use one vertical Canvas line.
+
+### Performance
+
+Do not create multiple wick segments unless the visual design requires it.
+
+One vertical line is sufficient for the basic candlestick.
+
+---
+
+# 11. Implement Candle Body Geometry
+
+### Inputs
+
+```text
+center_x
+candle_width
+open_y
+close_y
+```
+
+### Transformation
+
+```text
+half_width = candle_width / 2
+
+left =
+    center_x - half_width
+
+right =
+    center_x + half_width
+
+top =
+    min(open_y, close_y)
+
+bottom =
+    max(open_y, close_y)
+```
+
+### Zero-height body
+
+If:
+
+```text
+open_y == close_y
+```
+
+force a minimum visible body height of:
+
+```text
+1 px
+```
+
+while keeping its center at the actual price.
+
+---
+
+# 12. Implement Price-to-Y Conversion
+
+### Inputs
+
+```text
+price
+visible_low
+visible_high
+chart_height
+top_margin = 0.20
+bottom_margin = 0.10
+```
+
+### Geometry
+
+```text
+top_reserved =
+    chart_height × 0.20
+
+bottom_reserved =
+    chart_height × 0.10
+
+data_height =
+    chart_height
+    - top_reserved
+    - bottom_reserved
+```
+
+Normalize price:
+
+```text
+normalized =
+    (price - visible_low)
+    /
+    (visible_high - visible_low)
+```
+
+Then invert for Canvas y coordinates:
+
+```text
+y =
+    top_reserved
+    +
+    (1 - normalized) × data_height
+```
+
+### Boundary
+
+If:
+
+```text
+visible_high == visible_low
+```
+
+do not divide by zero.
+
+Use a fixed center y position or expand the price range by a small internal epsilon.
+
+---
+
+# 13. Determine Candle State
+
+### Bull
+
+```text
+close > open
+```
+
+Use:
+
+```text
+body = #26A69A
+wick = #26A69A
+```
+
+### Bear
+
+```text
+close < open
+```
+
+Use:
+
+```text
+body = #EF5350
+wick = #EF5350
+```
+
+### Neutral
+
+```text
+close == open
+```
+
+Use:
+
+```text
+neutral_wick = #737375
+```
+
+The neutral body policy should be explicitly configured rather than inferred by the renderer.
+
+---
+
+# 14. Implement Visible Candle Rendering
+
+### Task
+
+Render only the candles that can affect the current viewport.
+
+### Inputs
+
+```text
+render_first
+render_last
+OHLCV data
+time scale
+price scale
+candle width
+style
+Canvas
+```
+
+### Steps
+
+For each:
+
+```text
+index = render_first ... render_last
+```
+
+perform:
+
+```text
+retrieve OHLC
+        ↓
+logical index → center_x
+        ↓
+OHLC → y coordinates
+        ↓
+calculate body geometry
+        ↓
+calculate wick geometry
+        ↓
+determine bull/bear/neutral
+        ↓
+select colors
+        ↓
+update Canvas wick
+        ↓
+update Canvas body
+```
+
+### Hot-loop restriction
+
+Inside this loop, do **not**:
+
+* scan the entire dataset
+* calculate visible range
+* calculate candle width repeatedly
+* calculate constant colors
+* recreate scale objects
+* recreate Canvas pools
+* calculate global indicators
+* allocate unnecessary temporary structures
+
+---
+
+# 15. Implement Canvas Item Reuse
+
+### Task
+
+Use retained Canvas objects instead of destroying and recreating candles on every render.
+
+### State
+
+```text
+candle_pool
+    ├── wick_canvas_id
+    ├── body_canvas_id
+    └── logical_index
+```
+
+### Initial allocation
+
+Create enough Canvas objects for:
+
+```text
+visible_candles + 2 × overscan
+```
+
+If:
+
+```text
+visible = 200
+overscan = 20
+```
+
+initial pool target:
+
+```text
+200 + 40
+= 240 candle slots
+```
+
+Each slot requires:
+
+```text
+1 wick line
+1 body rectangle
+```
+
+Therefore:
+
+```text
+240 wick items
+240 body items
+```
+
+### Reuse
+
+When viewport moves:
+
+```text
+existing Canvas item
+    ↓
+assign to new candle index
+    ↓
+update coordinates
+    ↓
+update color
+```
+
+Do not:
+
+```text
+delete old candle
+create new candle
+```
+
+for ordinary panning.
+
+---
+
+# 16. Implement Crosshair Overlay
+
+### Configuration
+
+```text
+mode = Magnet
+color = #758696
+width = 1 px
+style = LargeDashed
+visible = true
+label_visible = true
+label_background = #4C525E
+```
+
+### Mouse move
+
+```text
+mouse_x
+mouse_y
+    ↓
+x → float logical index
+y → price
+    ↓
+optional magnet snapping
+    ↓
+calculate crosshair x/y
+    ↓
+update existing Canvas overlay
+```
+
+### Critical architecture rule
+
+Crosshair movement must not trigger:
+
+```text
+full candle redraw
+```
+
+Only the overlay should change.
+
+---
+
+# 17. Implement Interaction Invalidation
+
+## Pan
+
+```text
+mouse drag
+    ↓
+TIME_SCALE_DIRTY
+GEOMETRY_DIRTY
+```
+
+## Zoom
+
+```text
+mouse wheel
+    ↓
+TIME_SCALE_DIRTY
+GEOMETRY_DIRTY
+PRICE_SCALE_DIRTY
+```
+
+## New candle
+
+```text
+DATA_DIRTY
+GEOMETRY_DIRTY
+possibly PRICE_SCALE_DIRTY
+```
+
+## Crosshair
+
+```text
+CROSSHAIR_DIRTY
+```
+
+## Style change
+
+```text
+STYLE_DIRTY
+```
+
+## Resize
+
+```text
+TIME_SCALE_DIRTY
+PRICE_SCALE_DIRTY
+GEOMETRY_DIRTY
+```
+
+---
+
+# 18. Implement Render Scheduler
+
+### Task
+
+Convert many input events into a controlled number of rendering passes.
+
+### Required state
+
+```text
+render_pending = false
+dirty_flags
+```
+
+### On invalidation
+
+If:
+
+```text
+render_pending == true
+```
+
+do nothing except preserve the dirty flags.
+
+If:
+
+```text
+render_pending == false
+```
+
+schedule one render.
+
+### Conceptual sequence
+
+```text
+mouse event 1
+    ↓
+invalidate
+    ↓
+schedule render
+
+mouse event 2
+    ↓
+invalidate
+    ↓
+render already pending
+    ↓
+do not schedule another
+
+mouse event 3
+    ↓
+invalidate
+    ↓
+render already pending
+    ↓
+do not schedule another
+
+scheduled callback
+    ↓
+one render
+```
+
+Therefore:
+
+```text
+20 events
+→ potentially 1 render
+```
+
+rather than:
+
+```text
+20 events
+→ 20 renders
+```
+
+---
+
+# 19. Implement Rendering Order
+
+The final rendering pipeline must remain:
+
+```text
+DATA
+  ↓
+VIEWPORT
+  ↓
+SCALE
+  ↓
+GEOMETRY
+  ↓
+STYLE
+  ↓
+RENDERER
+  ↓
+CANVAS
+```
+
+### Full candle pipeline
+
+```text
+OHLCV
+ ↓
+logical index
+ ↓
+visible range
+ ↓
+logical index → x
+ ↓
+price → y
+ ↓
+candle width
+ ↓
+body/wick geometry
+ ↓
+bull/bear state
+ ↓
+color
+ ↓
+Canvas line/rectangle
+```
+
+### Do not reverse dependencies.
+
+For example:
+
+```text
+Canvas
+  ↓
+Data
+```
+
+is prohibited.
+
+The renderer must not retrieve unrelated chart state.
+
+---
+
+# 20. Implement Density Mode
+
+### Normal mode
+
+Condition:
+
+```text
+bar_spacing >= 1.0 px
+```
+
+Action:
+
+```text
+render normal candles
+```
+
+### Dense mode
+
+Condition:
+
+```text
+bar_spacing < 1.0 px
+```
+
+Action:
+
+```text
+enable density-aware processing
+```
+
+### Conflation candidate
+
+Condition:
+
+```text
+screen-space separation < 0.5 px
+```
+
+Action:
+
+```text
+consider aggregation
+```
+
+### Aggregation
+
+For N source candles:
+
+```text
+open  = first.open
+high  = maximum high
+low   = minimum low
+close = last.close
+volume = sum(volume)
+```
+
+This preserves OHLC semantics.
+
+---
+
+# 21. Implement Right Offset
+
+### Initial value
+
+```text
+right_offset = 5 bars
+```
+
+Recommended adjustable range:
+
+```text
+5–10 bars
+```
+
+### Example
+
+If:
+
+```text
+last_index = 999
+right_offset = 5
+```
+
+the latest candle is positioned relative to:
+
+```text
+logical position ≈ 1004
+```
+
+leaving approximately:
+
+```text
+5 bars
+```
+
+of future space.
+
+### User-scrolled state
+
+If the user manually pans away from the latest candle:
+
+```text
+do not automatically force viewport back
+```
+
+unless an explicit "follow latest" mode is enabled.
+
+---
+
+# 22. Implement New-Data Update
+
+### New candle
+
+```text
+append candle
+    ↓
+increment data count
+    ↓
+invalidate data
+    ↓
+update visible range if following latest
+    ↓
+update price scale if required
+    ↓
+schedule render
+```
+
+### Existing live candle
+
+If timestamp/logical index already exists:
+
+```text
+update OHLCV
+    ↓
+recalculate affected geometry
+    ↓
+update price range if high/low changed
+    ↓
+schedule render
+```
+
+### Important
+
+Do not rebuild all historical candles because the latest candle changed.
+
+---
+
+# 23. Implement Resize
+
+### Inputs
+
+```text
+new_canvas_width
+new_canvas_height
+```
+
+### Steps
+
+```text
+update dimensions
+    ↓
+visible_bars = width / bar_spacing
+    ↓
+update visible_to
+    ↓
+recalculate price-scale data_height
+    ↓
+recalculate visible candle geometry
+    ↓
+recalculate grid
+    ↓
+update crosshair if necessary
+    ↓
+schedule render
+```
+
+---
+
+# 24. Performance Rules
+
+## Calculate once
+
+Calculate once until configuration changes:
+
+```text
+colors
+minimum spacing
+zoom divisor
+wick width
+overscan
+grid style
+crosshair style
+```
+
+## Calculate when data changes
+
+```text
+data count
+data index
+price-range statistics
+aggregation cache
+```
+
+## Calculate when viewport changes
+
+```text
+visible_from
+visible_to
+render_first
+render_last
+visible_bars
+```
+
+## Calculate when zoom changes
+
+```text
+bar_spacing
+candle_width
+x coordinates
+visible range
+```
+
+## Calculate when price range changes
+
+```text
+price-to-y transformation
+high_y
+low_y
+open_y
+close_y
+```
+
+## Calculate for every visible candle
+
+Only:
+
+```text
+OHLC retrieval
+center_x
+open_y
+high_y
+low_y
+close_y
+body geometry
+wick geometry
+bull/bear state
+Canvas update
+```
+
+## Calculate for every mouse event
+
+Only:
+
+```text
+mouse coordinate
+logical coordinate
+crosshair coordinate
+pan delta
+zoom anchor
+```
+
+depending on event type.
+
+---
+
+# 25. Operations Prohibited From Hot Loops
+
+Do not perform these inside the per-candle loop:
+
+```text
+atan()
+```
+
+unless candle width actually depends on a spacing change.
+
+Do not perform:
+
+```text
+color configuration lookup
+```
+
+through expensive object traversal.
+
+Do not perform:
+
+```text
+full data scan
+```
+
+Do not perform:
+
+```text
+visible-range calculation
+```
+
+Do not perform:
+
+```text
+price-range discovery over entire dataset
+```
+
+Do not perform:
+
+```text
+Canvas item creation
+```
+
+if a reusable item exists.
+
+Do not perform:
+
+```text
+Canvas item deletion
+```
+
+during ordinary panning.
+
+Do not perform:
+
+```text
+indicator recalculation
+```
+
+for every candle during viewport movement.
+
+---
+
+# 26. Boundary Conditions
+
+## Empty dataset
+
+```text
+data_count = 0
+```
+
+Render:
+
+```text
+background
+grid if appropriate
+crosshair if appropriate
+```
+
+Do not attempt candle access.
+
+## One candle
+
+```text
+visible range may contain fractional positions
+```
+
+Clamp render index to:
+
+```text
+0
+```
+
+## Zoom minimum
+
+```text
+bar_spacing = 0.5
+```
+
+Further zoom-out must not reduce spacing.
+
+## Very large spacing
+
+Example:
+
+```text
+bar_spacing = 100
+```
+
+Candle width remains constrained by the width formula and does not exceed:
+
+```text
+bar_spacing
+```
+
+## Zero price range
+
+If:
+
+```text
+high == low
+```
+
+avoid division by zero.
+
+## Fractional viewport
+
+Valid:
+
+```text
+visible_from = -4.73
+visible_to = 195.42
+```
+
+Do not round these values.
+
+## Negative logical positions
+
+Allowed because the right/left viewport may contain empty space before the first data point.
+
+## Pan beyond dataset
+
+Clamp according to configured chart behavior, but do not destroy fractional positioning.
+
+---
+
+# 27. Final Rendering Pipeline
+
+The implementation must ultimately behave as follows.
+
+## Initial chart
+
+```text
+Load OHLCV
+    ↓
+Create DataModel
+    ↓
+Configure:
+    bar_spacing = 6.0
+    min_bar_spacing = 0.5
+    right_offset = 5
+    top_margin = 0.20
+    bottom_margin = 0.10
+    overscan = 20
+    wick_width = 1
+    ↓
+Calculate visible range
+    ↓
+Calculate price range
+    ↓
+Calculate candle width
+    ↓
+Create Canvas item pool
+    ↓
+Render visible + 20 overscan
+```
+
+## Pan
+
+```text
+mouse press
+    ↓
+store mouse position
+    ↓
+mouse drag
+    ↓
+pixel_delta
+    ↓
+logical_delta = pixel_delta / bar_spacing
+    ↓
+update fractional viewport
+    ↓
+calculate visible range
+    ↓
+reuse Canvas items
+    ↓
+update coordinates
+    ↓
+render
+```
+
+## Zoom
+
+```text
+wheel
+    ↓
+cursor_x → float logical index
+    ↓
+new_spacing =
+    spacing + zoom_scale × spacing / 10
+    ↓
+clamp >= 0.5
+    ↓
+restore logical index under cursor
+    ↓
+calculate visible range
+    ↓
+calculate candle width
+    ↓
+update Canvas geometry
+    ↓
+render
+```
+
+## Crosshair
+
+```text
+mouse move
+    ↓
+x → logical index
+y → price
+    ↓
+magnet/snap
+    ↓
+update crosshair Canvas items
+    ↓
+render overlay only
+```
+
+## New candle
+
+```text
+new OHLCV
+    ↓
+DataModel update
+    ↓
+update logical count
+    ↓
+update visible range if follow-latest
+    ↓
+update price range
+    ↓
+update affected Canvas items
+    ↓
+render
+```
+
+# IMPLEMENTATION ORDER
+
+Implement in this exact order:
+
+```text
+01. Chart configuration constants
+        ↓
+02. OHLCV DataModel
+        ↓
+03. Logical index system
+        ↓
+04. TimeScale state
+        ↓
+05. Logical index → x conversion
+        ↓
+06. x → float logical index conversion
+        ↓
+07. Viewport visible_from / visible_to
+        ↓
+08. Visible index calculation
+        ↓
+09. PriceScale state
+        ↓
+10. Price → y conversion
+        ↓
+11. Candle width calculation
+        ↓
+12. Wick width calculation
+        ↓
+13. Candle geometry
+        ↓
+14. Bull/bear/neutral style selection
+        ↓
+15. Canvas candle item pool
+        ↓
+16. Visible candle renderer
+        ↓
+17. Canvas item reuse
+        ↓
+18. Grid renderer
+        ↓
+19. Mouse pan
+        ↓
+20. Proportional zoom
+        ↓
+21. Cursor-centered zoom
+        ↓
+22. Crosshair overlay
+        ↓
+23. Render dirty flags
+        ↓
+24. Render scheduler
+        ↓
+25. Data-update invalidation
+        ↓
+26. Resize invalidation
+        ↓
+27. Right-offset / follow-latest behavior
+        ↓
+28. Density detection
+        ↓
+29. OHLC aggregation/conflation
+        ↓
+30. Performance measurement
+        ↓
+31. Stress testing
+```
+
+# MINIMUM FIRST WORKING MILESTONE
+
+Before implementing conflation, kinetic scrolling, indicators, drawing tools, or other chart features, the following must work correctly:
+
+```text
+OHLCV
+ ↓
+TimeScale
+ ↓
+Viewport
+ ↓
+PriceScale
+ ↓
+CandleGeometry
+ ↓
+Style
+ ↓
+Canvas
+```
+
+with:
+
+```text
+bar_spacing = 6.0 px
+min_bar_spacing = 0.5 px
+right_offset = 5 bars
+top_margin = 20%
+bottom_margin = 10%
+wick_width = 1 px
+overscan = 20 bars
+```
+
+and these interactions:
+
+```text
+Pan
+    logical_delta = pixel_delta / bar_spacing
+
+Zoom
+    new_spacing =
+        spacing + zoom_scale × spacing / 10
+
+Zoom anchor
+    same floating logical index remains under cursor
+
+Crosshair
+    overlay-only update
+
+Rendering
+    visible + 20 overscan only
+
+Scheduling
+    multiple invalidations → one pending render
+```
+
+Only after this milestone is stable should the implementation proceed to:
+
+```text
+density handling
+    ↓
+OHLC conflation
+    ↓
+kinetic scrolling
+    ↓
+advanced grid
+    ↓
+indicators
+    ↓
+drawing tools
+    ↓
+multi-series rendering
+    ↓
+advanced interaction
+```
+
+# CORE ARCHITECTURAL CONTRACT
+
+Every implementation task must preserve this dependency direction:
+
+```text
+DATA
+  ↓
+VIEWPORT / STATE
+  ↓
+SCALE
+  ↓
+GEOMETRY
+  ↓
+STYLE
+  ↓
+RENDERER
+  ↓
+CANVAS
+```
+
+The most important runtime contract is:
+
+```text
+USER EVENT
+    ↓
+UPDATE MINIMUM STATE
+    ↓
+INVALIDATE
+    ↓
+COALESCE
+    ↓
+RENDER SCHEDULE
+    ↓
+VISIBLE RANGE
+    ↓
+SCALE
+    ↓
+GEOMETRY
+    ↓
+STYLE
+    ↓
+REUSE CANVAS ITEMS
+    ↓
+CANVAS
+```
+
+The implementation must **never** turn:
+
+```text
+mouse movement
+```
+
+into:
+
+```text
+full dataset calculation
++
+full geometry rebuild
++
+Canvas deletion
++
+Canvas recreation
+```
+
+The target architecture instead turns it into:
+
+```text
+mouse movement
+→ small state change
+→ dirty flag
+→ one scheduled render
+→ visible range
+→ cached transformations
+→ reused Canvas objects
+```
+
+That is the core mechanism responsible for achieving the TradingView/Lightweight-Charts-like interaction model in a Tkinter Canvas implementation.

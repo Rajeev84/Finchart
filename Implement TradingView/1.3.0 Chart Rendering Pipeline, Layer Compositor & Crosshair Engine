@@ -1,0 +1,69 @@
+T. DRAWING PRIMITIVES
+│
+├── T1. Coordinate Anchors
+│   ├── T1.1 Time/Index anchor
+│   ├── T1.2 Price anchor
+│   ├── T1.3 Screen-pixel anchor
+│   ├── T1.4 Absolute chart anchor
+│   └── T1.5 Anchor → screen coordinate
+│
+├── T2. Line Primitive
+│   ├── T2.1 Point A
+│   ├── T2.2 Point B
+│   ├── T2.3 Width
+│   ├── T2.4 Color
+│   ├── T2.5 Style
+│   ├── T2.6 Extension
+│   └── T2.7 Render
+│
+├── T3. Circle / Ellipse Primitive
+│   ├── T3.1 Center
+│   ├── T3.2 Radius X
+│   ├── T3.3 Radius Y
+│   ├── T3.4 Fill
+│   ├── T3.5 Outline
+│   └── T3.6 Render
+│
+├── T4. Rectangle Primitive
+│   ├── T4.1 Point A
+│   ├── T4.2 Point B
+│   ├── T4.3 Fill
+│   ├── T4.4 Outline
+│   └── T4.5 Render
+│
+├── T5. Arc Primitive
+│   ├── T5.1 Bounding rectangle
+│   ├── T5.2 Start angle
+│   ├── T5.3 Sweep angle
+│   ├── T5.4 Width
+│   ├── T5.5 Color
+│   └── T5.6 Render
+│
+├── T6. Text Primitive
+│   ├── T6.1 Anchor
+│   ├── T6.2 Text
+│   ├── T6.3 Font
+│   ├── T6.4 Size
+│   ├── T6.5 Color
+│   ├── T6.6 Alignment
+│   └── T6.7 Render
+│
+├── T7. Polygon Primitive
+│   ├── T7.1 Point list
+│   ├── T7.2 Fill
+│   ├── T7.3 Outline
+│   └── T7.4 Render
+│
+├── T8. Path Primitive
+│   ├── T8.1 Point sequence
+│   ├── T8.2 Open/closed
+│   ├── T8.3 Stroke
+│   └── T8.4 Render
+│
+└── T9. Primitive Lifecycle
+    ├── T9.1 Create
+    ├── T9.2 Update
+    ├── T9.3 Hide
+    ├── T9.4 Show
+    ├── T9.5 Delete
+    └── T9.6 Reuse Canvas item

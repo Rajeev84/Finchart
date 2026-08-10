@@ -1,0 +1,684 @@
+CHART LAYOUT & PANE COMPOSITION ENGINE
+│
+├── 1. ARCHITECTURAL FOUNDATION
+│   │
+│   ├── 1.1 Define layout ownership boundary
+│   │   ├── 1.1.1 Layout owns pane existence/order
+│   │   ├── 1.1.2 Layout owns component-to-pane membership
+│   │   ├── 1.1.3 Layout owns visibility
+│   │   ├── 1.1.4 Layout owns pane dimensions/state
+│   │   ├── 1.1.5 Layout owns scale assignment
+│   │   ├── 1.1.6 Layout does not calculate scale ranges
+│   │   ├── 1.1.7 Layout does not calculate coordinates
+│   │   ├── 1.1.8 Layout does not process interaction
+│   │   ├── 1.1.9 Layout does not render
+│   │   └── 1.1.10 Layout has no Workspace dependency
+│   │
+│   ├── 1.2 Define dependency direction
+│   │   ├── 1.2.1 ChartState → Layout state
+│   │   ├── 1.2.2 Layout → existing Scale systems
+│   │   ├── 1.2.3 Layout → existing Series/Indicator objects
+│   │   ├── 1.2.4 Layout → existing Renderer through resolved model
+│   │   └── 1.2.5 Renderer never becomes layout owner
+│   │
+│   ├── 1.3 Define layout lifecycle
+│   │   ├── 1.3.1 create
+│   │   ├── 1.3.2 attach
+│   │   ├── 1.3.3 mutate
+│   │   ├── 1.3.4 normalize
+│   │   ├── 1.3.5 validate
+│   │   ├── 1.3.6 resolve
+│   │   ├── 1.3.7 capture
+│   │   ├── 1.3.8 restore
+│   │   └── 1.3.9 reset
+│   │
+│   └── 1.4 Establish layout version
+│       ├── 1.4.1 layout schema version = 1
+│       └── 1.4.2 reserve migration compatibility
+│
+├── 2. LAYOUT DOMAIN MODEL
+│   │
+│   ├── 2.1 Create ChartLayout
+│   │   ├── 2.1.1 layout_id
+│   │   ├── 2.1.2 version
+│   │   ├── 2.1.3 panes
+│   │   ├── 2.1.4 main_pane_id
+│   │   └── 2.1.5 configuration
+│   │
+│   ├── 2.2 Create Pane model
+│   │   ├── 2.2.1 pane_id
+│   │   ├── 2.2.2 index
+│   │   ├── 2.2.3 role
+│   │   ├── 2.2.4 visible
+│   │   ├── 2.2.5 collapsed
+│   │   ├── 2.2.6 height
+│   │   ├── 2.2.7 min_height
+│   │   ├── 2.2.8 max_height
+│   │   ├── 2.2.9 previous_height
+│   │   ├── 2.2.10 series_ids
+│   │   ├── 2.2.11 indicator_ids
+│   │   ├── 2.2.12 price_scale_ids
+│   │   └── 2.2.13 configuration
+│   │
+│   ├── 2.3 Define pane roles
+│   │   ├── 2.3.1 MAIN
+│   │   ├── 2.3.2 INDICATOR
+│   │   └── 2.3.3 CUSTOM
+│   │
+│   ├── 2.4 Define series layout state
+│   │   ├── 2.4.1 series_id
+│   │   ├── 2.4.2 pane_id
+│   │   ├── 2.4.3 visibility
+│   │   ├── 2.4.4 placement mode
+│   │   └── 2.4.5 scale policy
+│   │
+│   ├── 2.5 Define indicator layout state
+│   │   ├── 2.5.1 indicator_id
+│   │   ├── 2.5.2 pane_id
+│   │   ├── 2.5.3 visibility
+│   │   ├── 2.5.4 placement mode
+│   │   ├── 2.5.5 target pane
+│   │   └── 2.5.6 scale policy
+│   │
+│   ├── 2.6 Define placement modes
+│   │   ├── 2.6.1 OVERLAY
+│   │   ├── 2.6.2 NEW_PANE
+│   │   └── 2.6.3 EXISTING_PANE
+│   │
+│   └── 2.7 Define scale policies
+│       ├── 2.7.1 AS_SOURCE
+│       ├── 2.7.2 NEW_LEFT
+│       ├── 2.7.3 NEW_RIGHT
+│       └── 2.7.4 NO_SCALE
+│
+├── 3. DEFAULT CONFIGURATION
+│   │
+│   ├── 3.1 Default layout
+│   │   ├── 3.1.1 pane count = 1
+│   │   ├── 3.1.2 main pane index = 0
+│   │   ├── 3.1.3 main pane visible = true
+│   │   └── 3.1.4 main pane collapsed = false
+│   │
+│   ├── 3.2 Default main series
+│   │   ├── 3.2.1 attach to main pane
+│   │   ├── 3.2.2 visible = true
+│   │   └── 3.2.3 source price scale = default right
+│   │
+│   ├── 3.3 Default pane sizing
+│   │   ├── 3.3.1 main pane receives majority of available height
+│   │   ├── 3.3.2 indicator panes receive secondary allocation
+│   │   ├── 3.3.3 minimum height enforced
+│   │   └── 3.3.4 allocation depends on available chart height
+│   │
+│   ├── 3.4 Default price-study placement
+│   │   ├── 3.4.1 source pane
+│   │   ├── 3.4.2 OVERLAY
+│   │   └── 3.4.3 AS_SOURCE scale
+│   │
+│   └── 3.5 Default non-price-study placement
+│       ├── 3.5.1 create indicator pane
+│       ├── 3.5.2 NEW_PANE
+│       └── 3.5.3 NEW_RIGHT scale
+│
+├── 4. MAIN PANE MANAGEMENT
+│   │
+│   ├── 4.1 Create main pane
+│   │   ├── 4.1.1 generate stable pane ID
+│   │   ├── 4.1.2 assign MAIN role
+│   │   ├── 4.1.3 assign index 0
+│   │   ├── 4.1.4 visible = true
+│   │   └── 4.1.5 collapsed = false
+│   │
+│   ├── 4.2 Enforce main pane uniqueness
+│   │   ├── 4.2.1 detect duplicate MAIN panes
+│   │   ├── 4.2.2 reject invalid creation
+│   │   └── 4.2.3 normalize recoverable corruption
+│   │
+│   ├── 4.3 Protect main pane
+│   │   ├── 4.3.1 prevent deletion
+│   │   ├── 4.3.2 prevent invalid role change
+│   │   └── 4.3.3 prevent unusable permanent collapse
+│   │
+│   └── 4.4 Resolve main pane
+│       ├── 4.4.1 lookup by main_pane_id
+│       ├── 4.4.2 verify role MAIN
+│       └── 4.4.3 repair if recoverable
+│
+├── 5. PANE CREATION & REMOVAL
+│   │
+│   ├── 5.1 Create pane
+│   │   ├── 5.1.1 generate unique ID
+│   │   ├── 5.1.2 assign role
+│   │   ├── 5.1.3 assign deterministic index
+│   │   ├── 5.1.4 initialize visibility
+│   │   ├── 5.1.5 initialize dimensions
+│   │   └── 5.1.6 initialize component collections
+│   │
+│   ├── 5.2 Remove pane
+│   │   ├── 5.2.1 reject MAIN deletion
+│   │   ├── 5.2.2 verify pane exists
+│   │   ├── 5.2.3 detach/reconcile contained components
+│   │   ├── 5.2.4 remove pane references
+│   │   └── 5.2.5 normalize ordering
+│   │
+│   └── 5.3 Empty-pane cleanup
+│       ├── 5.3.1 detect no series
+│       ├── 5.3.2 detect no indicators
+│       ├── 5.3.3 preserve MAIN
+│       └── 5.3.4 remove empty non-main pane
+│
+├── 6. PANE ORDER MANAGEMENT
+│   │
+│   ├── 6.1 Initial ordering
+│   │   ├── 6.1.1 MAIN = index 0
+│   │   └── 6.1.2 new indicator panes follow existing panes
+│   │
+│   ├── 6.2 Move pane
+│   │   ├── 6.2.1 validate pane ID
+│   │   ├── 6.2.2 validate target index
+│   │   ├── 6.2.3 preserve MAIN at index 0
+│   │   ├── 6.2.4 move pane
+│   │   └── 6.2.5 renumber indexes
+│   │
+│   ├── 6.3 Normalize ordering
+│   │   ├── 6.3.1 sort according to stored order
+│   │   ├── 6.3.2 force MAIN first
+│   │   └── 6.3.3 regenerate contiguous indexes
+│   │
+│   └── 6.4 Ordering persistence
+│       ├── 6.4.1 capture order
+│       └── 6.4.2 restore order exactly
+│
+├── 7. SERIES ATTACHMENT & PLACEMENT
+│   │
+│   ├── 7.1 Attach series
+│   │   ├── 7.1.1 validate series ID
+│   │   ├── 7.1.2 resolve requested placement
+│   │   ├── 7.1.3 resolve target pane
+│   │   ├── 7.1.4 resolve scale policy
+│   │   ├── 7.1.5 attach series reference
+│   │   └── 7.1.6 normalize layout
+│   │
+│   ├── 7.2 Default price-compatible placement
+│   │   ├── 7.2.1 identify source pane
+│   │   ├── 7.2.2 OVERLAY
+│   │   └── 7.2.3 AS_SOURCE
+│   │
+│   ├── 7.3 Default non-price placement
+│   │   ├── 7.3.1 create indicator-style pane
+│   │   ├── 7.3.2 NEW_PANE
+│   │   └── 7.3.3 NEW_RIGHT
+│   │
+│   ├── 7.4 Explicit placement
+│   │   ├── 7.4.1 explicit OVERLAY
+│   │   ├── 7.4.2 explicit NEW_PANE
+│   │   ├── 7.4.3 explicit EXISTING_PANE
+│   │   ├── 7.4.4 explicit pane_id
+│   │   └── 7.4.5 explicit scale policy overrides default
+│   │
+│   ├── 7.5 Move series
+│   │   ├── 7.5.1 validate destination
+│   │   ├── 7.5.2 detach old membership
+│   │   ├── 7.5.3 attach new membership
+│   │   ├── 7.5.4 reconcile scale assignment
+│   │   └── 7.5.5 clean empty source pane
+│   │
+│   ├── 7.6 Detach series
+│   │   ├── 7.6.1 remove layout reference
+│   │   ├── 7.6.2 remove pane membership
+│   │   └── 7.6.3 normalize
+│   │
+│   └── 7.7 Series visibility
+│       ├── 7.7.1 set visible
+│       ├── 7.7.2 set hidden
+│       └── 7.7.3 preserve hidden series in state
+│
+├── 8. INDICATOR ATTACHMENT & PLACEMENT
+│   │
+│   ├── 8.1 Attach indicator
+│   │   ├── 8.1.1 validate indicator ID
+│   │   ├── 8.1.2 inspect indicator placement metadata
+│   │   ├── 8.1.3 resolve default placement
+│   │   ├── 8.1.4 resolve target pane
+│   │   ├── 8.1.5 resolve scale policy
+│   │   └── 8.1.6 normalize
+│   │
+│   ├── 8.2 Price overlay indicator
+│   │   ├── 8.2.1 identify source series/pane
+│   │   ├── 8.2.2 place in source pane
+│   │   ├── 8.2.3 OVERLAY
+│   │   └── 8.2.4 AS_SOURCE
+│   │
+│   ├── 8.3 Non-price indicator
+│   │   ├── 8.3.1 create new indicator pane
+│   │   ├── 8.3.2 append after existing panes
+│   │   ├── 8.3.3 NEW_PANE
+│   │   └── 8.3.4 NEW_RIGHT
+│   │
+│   ├── 8.4 Explicit indicator placement
+│   │   ├── 8.4.1 target pane
+│   │   ├── 8.4.2 force overlay
+│   │   ├── 8.4.3 explicit scale
+│   │   └── 8.4.4 explicit placement overrides defaults
+│   │
+│   ├── 8.5 Move indicator
+│   │   ├── 8.5.1 validate destination
+│   │   ├── 8.5.2 remove old membership
+│   │   ├── 8.5.3 attach destination membership
+│   │   ├── 8.5.4 reconcile scale assignment
+│   │   └── 8.5.5 clean empty source pane
+│   │
+│   ├── 8.6 Detach indicator
+│   │   ├── 8.6.1 remove indicator reference
+│   │   ├── 8.6.2 remove pane membership
+│   │   └── 8.6.3 remove resulting empty pane
+│   │
+│   └── 8.7 Indicator visibility
+│       ├── 8.7.1 visible = true
+│       ├── 8.7.2 visible = false
+│       └── 8.7.3 preserve hidden indicator
+│
+├── 9. PRICE SCALE ASSIGNMENT
+│   │
+│   ├── 9.1 Define scale reference
+│   │   ├── 9.1.1 scale ID
+│   │   ├── 9.1.2 pane association
+│   │   └── 9.1.3 assignment metadata
+│   │
+│   ├── 9.2 Resolve AS_SOURCE
+│   │   ├── 9.2.1 identify source scale
+│   │   └── 9.2.2 assign reference
+│   │
+│   ├── 9.3 Resolve NEW_RIGHT
+│   │   ├── 9.3.1 request new scale identity
+│   │   └── 9.3.2 assign series/indicator reference
+│   │
+│   ├── 9.4 Resolve NEW_LEFT
+│   │   ├── 9.4.1 request left scale identity
+│   │   └── 9.4.2 assign reference
+│   │
+│   ├── 9.5 Resolve NO_SCALE
+│   │   └── 9.5.1 store no-scale assignment
+│   │
+│   └── 9.6 Boundary verification
+│       ├── 9.6.1 no range calculation
+│       ├── 9.6.2 no coordinate calculation
+│       └── 9.6.3 existing PriceScale remains authoritative
+│
+├── 10. PANE VISIBILITY
+│   │
+│   ├── 10.1 Set pane visibility
+│   │   ├── 10.1.1 visible
+│   │   └── 10.1.2 hidden
+│   │
+│   ├── 10.2 Preserve hidden pane
+│   │   ├── 10.2.1 do not delete
+│   │   └── 10.2.2 preserve child references
+│   │
+│   └── 10.3 Main-pane protection
+│       └── 10.3.1 prevent unusable chart state
+│
+├── 11. PANE SIZING ENGINE
+│   │
+│   ├── 11.1 Define sizing modes
+│   │   ├── 11.1.1 fixed
+│   │   ├── 11.1.2 relative
+│   │   └── 11.1.3 auto
+│   │
+│   ├── 11.2 Default sizing
+│   │   ├── 11.2.1 main pane gets majority
+│   │   ├── 11.2.2 indicator panes get smaller allocation
+│   │   └── 11.2.3 derive actual pixels from available height
+│   │
+│   ├── 11.3 Resize pane
+│   │   ├── 11.3.1 validate requested height
+│   │   ├── 11.3.2 enforce min_height
+│   │   ├── 11.3.3 enforce max_height
+│   │   ├── 11.3.4 redistribute remaining height
+│   │   └── 11.3.5 preserve deterministic result
+│   │
+│   ├── 11.4 Height normalization
+│   │   ├── 11.4.1 calculate available height
+│   │   ├── 11.4.2 account for collapsed panes
+│   │   ├── 11.4.3 enforce minimums
+│   │   ├── 11.4.4 resolve overflow
+│   │   └── 11.4.5 resolve unused space
+│   │
+│   └── 11.5 Prevent renderer ownership
+│       └── 11.5.1 renderer receives resolved dimensions only
+│
+├── 12. PANE COLLAPSE / EXPAND
+│   │
+│   ├── 12.1 Collapse pane
+│   │   ├── 12.1.1 validate pane
+│   │   ├── 12.1.2 preserve current height
+│   │   ├── 12.1.3 write previous_height
+│   │   ├── 12.1.4 set collapsed = true
+│   │   └── 12.1.5 redistribute available height
+│   │
+│   ├── 12.2 Expand pane
+│   │   ├── 12.2.1 validate pane
+│   │   ├── 12.2.2 set collapsed = false
+│   │   ├── 12.2.3 restore previous_height
+│   │   └── 12.2.4 normalize dimensions
+│   │
+│   ├── 12.3 Toggle pane
+│   │   └── 12.3.1 dispatch collapse/expand
+│   │
+│   └── 12.4 Main-pane collapse protection
+│       ├── 12.4.1 prevent unusable primary chart
+│       └── 12.4.2 preserve minimum usable height
+│
+├── 13. LAYOUT VALIDATION
+│   │
+│   ├── 13.1 Structural validation
+│   │   ├── 13.1.1 exactly one MAIN
+│   │   ├── 13.1.2 main_pane_id exists
+│   │   ├── 13.1.3 pane IDs unique
+│   │   ├── 13.1.4 series IDs unique
+│   │   └── 13.1.5 indicator IDs unique
+│   │
+│   ├── 13.2 Reference validation
+│   │   ├── 13.2.1 series pane exists
+│   │   ├── 13.2.2 indicator pane exists
+│   │   ├── 13.2.3 scale reference valid
+│   │   └── 13.2.4 no deleted-pane references
+│   │
+│   ├── 13.3 Ordering validation
+│   │   ├── 13.3.1 indexes valid
+│   │   ├── 13.3.2 indexes unique
+│   │   └── 13.3.3 MAIN index = 0
+│   │
+│   ├── 13.4 Dimension validation
+│   │   ├── 13.4.1 height >= 0
+│   │   ├── 13.4.2 min_height >= 0
+│   │   ├── 13.4.3 max_height >= min_height
+│   │   └── 13.4.4 previous_height valid
+│   │
+│   └── 13.5 Configuration validation
+│       ├── 13.5.1 placement mode valid
+│       ├── 13.5.2 scale policy valid
+│       └── 13.5.3 role valid
+│
+├── 14. LAYOUT NORMALIZATION
+│   │
+│   ├── 14.1 Main-pane normalization
+│   │   ├── 14.1.1 create if absent
+│   │   ├── 14.1.2 select/repair main reference
+│   │   ├── 14.1.3 force MAIN role
+│   │   └── 14.1.4 force index 0
+│   │
+│   ├── 14.2 Pane normalization
+│   │   ├── 14.2.1 remove invalid pane references
+│   │   ├── 14.2.2 remove empty non-main panes
+│   │   └── 14.2.3 preserve stable IDs
+│   │
+│   ├── 14.3 Membership normalization
+│   │   ├── 14.3.1 remove duplicate membership
+│   │   ├── 14.3.2 remove deleted references
+│   │   └── 14.3.3 ensure membership consistency
+│   │
+│   ├── 14.4 Index normalization
+│   │   ├── 14.4.1 preserve relative order
+│   │   ├── 14.4.2 place MAIN first
+│   │   └── 14.4.3 regenerate indexes
+│   │
+│   ├── 14.5 Dimension normalization
+│   │   ├── 14.5.1 clamp invalid values
+│   │   ├── 14.5.2 enforce minimums
+│   │   └── 14.5.3 normalize collapse state
+│   │
+│   └── 14.6 Determinism check
+│       └── 14.6.1 identical input produces identical normalized output
+│
+├── 15. LAYOUT RESOLUTION
+│   │
+│   ├── 15.1 Resolve logical layout
+│   │   ├── 15.1.1 resolve pane order
+│   │   ├── 15.1.2 resolve visibility
+│   │   ├── 15.1.3 resolve memberships
+│   │   └── 15.1.4 resolve scale assignments
+│   │
+│   ├── 15.2 Resolve dimensions
+│   │   ├── 15.2.1 accept available chart width/height
+│   │   ├── 15.2.2 allocate pane heights
+│   │   ├── 15.2.3 account for collapsed panes
+│   │   └── 15.2.4 enforce constraints
+│   │
+│   ├── 15.3 Produce renderer-consumable layout
+│   │   ├── 15.3.1 pane geometry/configuration
+│   │   ├── 15.3.2 component membership
+│   │   ├── 15.3.3 scale references
+│   │   └── 15.3.4 visibility
+│   │
+│   └── 15.4 Boundary verification
+│       ├── 15.4.1 no canvas access
+│       ├── 15.4.2 no coordinate calculation
+│       ├── 15.4.3 no scale calculation
+│       └── 15.4.4 no indicator calculation
+│
+├── 16. CHART STATE INTEGRATION
+│   │
+│   ├── 16.1 Add layout to ChartState
+│   │   ├── 16.1.1 ChartState.layout reference/domain
+│   │   └── 16.1.2 avoid second persistence owner
+│   │
+│   ├── 16.2 Layout mutations
+│   │   ├── 16.2.1 route through ChartState state-update mechanism
+│   │   ├── 16.2.2 generate layout change notification
+│   │   └── 16.2.3 use existing invalidation pipeline
+│   │
+│   ├── 16.3 Layout capture
+│   │   ├── 16.3.1 expose serializable layout state
+│   │   └── 16.3.2 delegate persistence to State Engine
+│   │
+│   ├── 16.4 Layout restore
+│   │   ├── 16.4.1 restore layout domain
+│   │   ├── 16.4.2 validate snapshot
+│   │   ├── 16.4.3 normalize
+│   │   └── 16.4.4 trigger existing render invalidation
+│   │
+│   └── 16.5 Layout reset
+│       ├── 16.5.1 reset layout only
+│       ├── 16.5.2 preserve viewport
+│       ├── 16.5.3 preserve drawings
+│       └── 16.5.4 preserve session state
+│
+├── 17. LAYOUT CHANGE NOTIFICATIONS
+│   │
+│   ├── 17.1 Define change categories
+│   │   ├── 17.1.1 pane added
+│   │   ├── 17.1.2 pane removed
+│   │   ├── 17.1.3 pane reordered
+│   │   ├── 17.1.4 pane resized
+│   │   ├── 17.1.5 pane collapsed
+│   │   ├── 17.1.6 pane visibility changed
+│   │   ├── 17.1.7 series placement changed
+│   │   ├── 17.1.8 series visibility changed
+│   │   ├── 17.1.9 indicator placement changed
+│   │   ├── 17.1.10 indicator visibility changed
+│   │   └── 17.1.11 scale assignment changed
+│   │
+│   ├── 17.2 Notification payload
+│   │   ├── 17.2.1 change type
+│   │   ├── 17.2.2 affected IDs
+│   │   └── 17.2.3 resulting layout revision/version if supported
+│   │
+│   └── 17.3 Invalidation integration
+│       ├── 17.3.1 layout change requests existing invalidation
+│       └── 17.3.2 avoid unnecessary full-chart invalidation
+│
+├── 18. SERIALIZATION
+│   │
+│   ├── 18.1 Layout capture
+│   │   ├── 18.1.1 version
+│   │   ├── 18.1.2 layout_id
+│   │   ├── 18.1.3 main_pane_id
+│   │   ├── 18.1.4 ordered panes
+│   │   ├── 18.1.5 memberships
+│   │   ├── 18.1.6 visibility
+│   │   ├── 18.1.7 dimensions
+│   │   └── 18.1.8 scale assignments
+│   │
+│   ├── 18.2 Serialization boundary
+│   │   ├── 18.2.1 serialize configuration/state
+│   │   ├── 18.2.2 do not serialize renderer objects
+│   │   ├── 18.2.3 do not serialize canvas objects
+│   │   └── 18.2.4 do not serialize transient runtime geometry
+│   │
+│   ├── 18.3 Restore
+│   │   ├── 18.3.1 validate version
+│   │   ├── 18.3.2 deserialize domain state
+│   │   ├── 18.3.3 resolve references
+│   │   ├── 18.3.4 normalize
+│   │   └── 18.3.5 validate final state
+│   │
+│   └── 18.4 Compatibility
+│       ├── 18.4.1 reject unsupported future versions safely
+│       └── 18.4.2 migration boundary for future versions
+│
+├── 19. RESET
+│   │
+│   ├── 19.1 Reset layout
+│   │   ├── 19.1.1 remove non-main panes
+│   │   ├── 19.1.2 recreate/restore main pane
+│   │   ├── 19.1.3 restore main series membership
+│   │   ├── 19.1.4 restore default visibility
+│   │   ├── 19.1.5 restore default dimensions
+│   │   └── 19.1.6 restore default scale assignment
+│   │
+│   ├── 19.2 Preserve unrelated state
+│   │   ├── 19.2.1 preserve viewport
+│   │   ├── 19.2.2 preserve drawings
+│   │   ├── 19.2.3 preserve session
+│   │   └── 19.2.4 preserve interaction state where applicable
+│   │
+│   └── 19.3 Post-reset normalization
+│       ├── 19.3.1 validate
+│       └── 19.3.2 invalidate through existing pipeline
+│
+├── 20. TEST FOUNDATION
+│   │
+│   ├── 20.1 Model tests
+│   │   ├── 20.1.1 ChartLayout creation
+│   │   ├── 20.1.2 Pane creation
+│   │   ├── 20.1.3 unique IDs
+│   │   └── 20.1.4 default values
+│   │
+│   ├── 20.2 Main pane tests
+│   │   ├── 20.2.1 exactly one MAIN
+│   │   ├── 20.2.2 MAIN index zero
+│   │   ├── 20.2.3 MAIN cannot delete
+│   │   └── 20.2.4 MAIN remains usable
+│   │
+│   ├── 20.3 Placement tests
+│   │   ├── 20.3.1 price series overlays
+│   │   ├── 20.3.2 non-price series creates pane
+│   │   ├── 20.3.3 MA uses source pane
+│   │   ├── 20.3.4 RSI creates pane
+│   │   ├── 20.3.5 MACD creates another pane
+│   │   └── 20.3.6 explicit pane overrides default
+│   │
+│   ├── 20.4 Movement tests
+│   │   ├── 20.4.1 move series
+│   │   ├── 20.4.2 move indicator
+│   │   ├── 20.4.3 move pane
+│   │   └── 20.4.4 ordering remains deterministic
+│   │
+│   ├── 20.5 Visibility tests
+│   │   ├── 20.5.1 hide series
+│   │   ├── 20.5.2 hide indicator
+│   │   ├── 20.5.3 hide pane
+│   │   └── 20.5.4 hidden objects remain persisted
+│   │
+│   ├── 20.6 Collapse tests
+│   │   ├── 20.6.1 collapse
+│   │   ├── 20.6.2 preserve previous height
+│   │   ├── 20.6.3 expand
+│   │   └── 20.6.4 restore previous height
+│   │
+│   ├── 20.7 Sizing tests
+│   │   ├── 20.7.1 minimum height
+│   │   ├── 20.7.2 maximum height
+│   │   ├── 20.7.3 insufficient total height
+│   │   ├── 20.7.4 unused available height
+│   │   └── 20.7.5 deterministic allocation
+│   │
+│   ├── 20.8 Cleanup tests
+│   │   ├── 20.8.1 detach last indicator
+│   │   ├── 20.8.2 empty pane removed
+│   │   └── 20.8.3 MAIN preserved
+│   │
+│   ├── 20.9 Validation tests
+│   │   ├── 20.9.1 duplicate main
+│   │   ├── 20.9.2 duplicate IDs
+│   │   ├── 20.9.3 missing pane reference
+│   │   ├── 20.9.4 invalid dimensions
+│   │   ├── 20.9.5 invalid placement
+│   │   └── 20.9.6 invalid scale policy
+│   │
+│   ├── 20.10 Normalization tests
+│   │   ├── 20.10.1 missing MAIN repaired
+│   │   ├── 20.10.2 MAIN moved to zero
+│   │   ├── 20.10.3 orphan pane removed
+│   │   ├── 20.10.4 indexes regenerated
+│   │   └── 20.10.5 stable IDs preserved
+│   │
+│   ├── 20.11 Serialization tests
+│   │   ├── 20.11.1 capture
+│   │   ├── 20.11.2 serialize
+│   │   ├── 20.11.3 deserialize
+│   │   ├── 20.11.4 equivalent state
+│   │   └── 20.11.5 version exists
+│   │
+│   ├── 20.12 Reset tests
+│   │   ├── 20.12.1 complex layout
+│   │   ├── 20.12.2 reset
+│   │   ├── 20.12.3 one main pane
+│   │   └── 20.12.4 unrelated state preserved
+│   │
+│   └── 20.13 Boundary tests
+│       ├── 20.13.1 no Canvas access
+│       ├── 20.13.2 no mouse handling
+│       ├── 20.13.3 no zoom implementation
+│       ├── 20.13.4 no pan implementation
+│       ├── 20.13.5 no coordinate calculation
+│       ├── 20.13.6 no scale-range calculation
+│       ├── 20.13.7 no indicator calculation
+│       └── 20.13.8 no Workspace dependency
+│
+└── 21. INTEGRATION & REGRESSION
+    │
+    ├── 21.1 ChartState integration
+    │   ├── 21.1.1 layout appears in ChartState
+    │   ├── 21.1.2 layout mutations produce state changes
+    │   └── 21.1.3 existing persistence captures layout
+    │
+    ├── 21.2 Existing subsystem integration
+    │   ├── 21.2.1 existing TimeScale remains authoritative
+    │   ├── 21.2.2 existing PriceScale remains authoritative
+    │   ├── 21.2.3 existing viewport remains authoritative
+    │   ├── 21.2.4 existing renderer consumes layout
+    │   └── 21.2.5 existing compositor remains authoritative
+    │
+    ├── 21.3 Regression tests
+    │   ├── 21.3.1 interaction tests remain passing
+    │   ├── 21.3.2 viewport tests remain passing
+    │   ├── 21.3.3 persistence tests remain passing
+    │   ├── 21.3.4 rendering tests remain passing
+    │   └── 21.3.5 drawing tests remain passing
+    │
+    ├── 21.4 Determinism tests
+    │   ├── 21.4.1 same state + same dimensions
+    │   ├── 21.4.2 same pane order
+    │   ├── 21.4.3 same membership
+    │   ├── 21.4.4 same visibility
+    │   └── 21.4.5 same resolved dimensions
+    │
+    └── 21.5 Architecture gate
+        ├── 21.5.1 no Workspace code
+        ├── 21.5.2 no multi-chart logic
+        ├── 21.5.3 no new viewport engine
+        ├── 21.5.4 no new scale engine
+        ├── 21.5.5 no new renderer
+        └── 21.5.6 no duplicated subsystem responsibility
