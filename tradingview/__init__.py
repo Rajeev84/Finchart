@@ -1,0 +1,1 @@
+# FinChart TradingView module initialization

@@ -1,0 +1,317 @@
+finchart_gui_chart_api.py creates funtions as intermediary for finchart and tkinter program.
+for example demo_gui_chart.py uses finchart_gui_chart_api.py for implementing interaction level funtions like drawing,copying,pasting,selecting,modifying,deleting shapes.
+1. GUI ↔ FINCHART DRAWING INTERACTION ENGINE
+│
+├── 1.1 Canvas Interaction Foundation
+│   │
+│   ├── 1.1.1 Canvas event capture
+│   ├── 1.1.2 Mouse button state management
+│   ├── 1.1.3 Mouse drag state management
+│   ├── 1.1.4 Keyboard event management
+│   ├── 1.1.5 Modifier-key management
+│   └── 1.1.6 Interaction state machine
+│       ├── 1.1.6.1 IDLE
+│       ├── 1.1.6.2 DRAW_READY
+│       ├── 1.1.6.3 DRAWING
+│       ├── 1.1.6.4 SELECTED
+│       ├── 1.1.6.5 MOVING
+│       ├── 1.1.6.6 RESIZING
+│       ├── 1.1.6.7 COPYING
+│       └── 1.1.6.8 CANCELLED
+│
+├── 1.2 Coordinate Conversion Layer
+│   │
+│   ├── 1.2.1 Canvas → chart-local coordinates
+│   ├── 1.2.2 Chart-local → logical index
+│   ├── 1.2.3 Chart-local → price
+│   ├── 1.2.4 Logical index + price → chart-local
+│   ├── 1.2.5 Chart-local → Canvas coordinates
+│   └── 1.2.6 Coordinate conversion validation
+│       ├── 1.2.6.1 Different zoom levels
+│       ├── 1.2.6.2 Different timeframes
+│       ├── 1.2.6.3 Panning
+│       └── 1.2.6.4 Price-scale changes
+│
+├── 1.3 Drawing Tool Controller
+│   │
+│   ├── 1.3.1 Tool activation
+│   ├── 1.3.2 Tool deactivation
+│   ├── 1.3.3 Tool switching
+│   ├── 1.3.4 Escape cancellation
+│   ├── 1.3.5 Right-click cancellation
+│   └── 1.3.6 Tool ownership of mouse events
+│
+├── 1.4 Drawing Creation Engine
+│   │
+│   ├── 1.4.1 First-point capture
+│   │   ├── 1.4.1.1 Canvas position
+│   │   ├── 1.4.1.2 Logical index
+│   │   └── 1.4.1.3 Price
+│   │
+│   ├── 1.4.2 Ghost drawing
+│   │   ├── 1.4.2.1 Fixed first point
+│   │   ├── 1.4.2.2 Dynamic second point
+│   │   ├── 1.4.2.3 Endpoint markers
+│   │   └── 1.4.2.4 Ghost rendering
+│   │
+│   ├── 1.4.3 Second-point capture
+│   ├── 1.4.4 Drawing validation
+│   ├── 1.4.5 FinChart drawing creation
+│   ├── 1.4.6 New drawing selection
+│   └── 1.4.7 Drawing completion
+│
+├── 1.5 Drawing Selection Engine
+│   │
+│   ├── 1.5.1 Hit-test request
+│   ├── 1.5.2 Handle hit testing
+│   ├── 1.5.3 Drawing-body hit testing
+│   ├── 1.5.4 Empty-space detection
+│   ├── 1.5.5 Select drawing
+│   ├── 1.5.6 Deselect drawing
+│   ├── 1.5.7 Replace current selection
+│   └── 1.5.8 Selection rendering state
+│
+├── 1.6 Drawing Hit-Test Engine
+│   │
+│   ├── 1.6.1 Drawing bounds
+│   ├── 1.6.2 Drawing body tolerance
+│   ├── 1.6.3 Handle tolerance
+│   ├── 1.6.4 Z-order testing
+│   ├── 1.6.5 Nearest drawing selection
+│   └── 1.6.6 Hit-test result
+│       ├── 1.6.6.1 EMPTY
+│       ├── 1.6.6.2 BODY
+│       ├── 1.6.6.3 ENDPOINT
+│       ├── 1.6.6.4 HANDLE
+│       └── 1.6.6.5 MULTIPLE
+│
+├── 1.7 Drawing Handle Engine
+│   │
+│   ├── 1.7.1 Handle definition
+│   ├── 1.7.2 Handle geometry calculation
+│   ├── 1.7.3 Handle rendering
+│   ├── 1.7.4 Handle visibility
+│   ├── 1.7.5 Handle hit testing
+│   └── 1.7.6 Handle semantic roles
+│
+├── 1.8 Line Interaction
+│   │
+│   ├── 1.8.1 Line geometry
+│   │   ├── 1.8.1.1 Start point
+│   │   └── 1.8.1.2 End point
+│   │
+│   ├── 1.8.2 Line drawing
+│   │   ├── 1.8.2.1 First click
+│   │   ├── 1.8.2.2 Preview
+│   │   ├── 1.8.2.3 Second click
+│   │   └── 1.8.2.4 Commit
+│   │
+│   ├── 1.8.3 Line selection
+│   │   ├── 1.8.3.1 Body selection
+│   │   ├── 1.8.3.2 Endpoint selection
+│   │   └── 1.8.3.3 Handle selection
+│   │
+│   ├── 1.8.4 Line selection markers
+│   │   ├── 1.8.4.1 Start-side 3 markers
+│   │   ├── 1.8.4.2 Middle-upper marker
+│   │   ├── 1.8.4.3 Middle-lower marker
+│   │   └── 1.8.4.4 End-side 3 markers
+│   │
+│   ├── 1.8.5 Line movement
+│   │   ├── 1.8.5.1 Mouse-down on body
+│   │   ├── 1.8.5.2 Capture original geometry
+│   │   ├── 1.8.5.3 Calculate movement delta
+│   │   ├── 1.8.5.4 Move both endpoints
+│   │   └── 1.8.5.5 Commit movement
+│   │
+│   ├── 1.8.6 Start-point resizing
+│   │   ├── 1.8.6.1 Hit start handle
+│   │   ├── 1.8.6.2 Drag
+│   │   ├── 1.8.6.3 Update start point
+│   │   └── 1.8.6.4 Commit resize
+│   │
+│   ├── 1.8.7 End-point resizing
+│   │   ├── 1.8.7.1 Hit end handle
+│   │   ├── 1.8.7.2 Drag
+│   │   ├── 1.8.7.3 Update end point
+│   │   └── 1.8.7.4 Commit resize
+│   │
+│   └── 1.8.8 Middle-handle transformation
+│       ├── 1.8.8.1 Define upper-middle semantics
+│       ├── 1.8.8.2 Define lower-middle semantics
+│       ├── 1.8.8.3 Calculate transformation
+│       └── 1.8.8.4 Commit transformation
+│
+├── 1.9 Rectangle / Box Interaction
+│   │
+│   ├── 1.9.1 Rectangle creation
+│   ├── 1.9.2 Rectangle selection
+│   ├── 1.9.3 Corner handles
+│   ├── 1.9.4 Edge handles
+│   ├── 1.9.5 Rectangle movement
+│   ├── 1.9.6 Rectangle resizing
+│   └── 1.9.7 Rectangle selection rendering
+│
+├── 1.10 Generic Drawing Movement Engine
+│   │
+│   ├── 1.10.1 Capture original geometry
+│   ├── 1.10.2 Capture mouse origin
+│   ├── 1.10.3 Calculate logical delta
+│   ├── 1.10.4 Calculate price delta
+│   ├── 1.10.5 Apply translation
+│   ├── 1.10.6 Live preview
+│   └── 1.10.7 Commit transaction
+│
+├── 1.11 Generic Drawing Resize Engine
+│   │
+│   ├── 1.11.1 Identify active handle
+│   ├── 1.11.2 Capture original geometry
+│   ├── 1.11.3 Convert cursor position
+│   ├── 1.11.4 Apply handle transformation
+│   ├── 1.11.5 Live preview
+│   └── 1.11.6 Commit transaction
+│
+├── 1.12 Copy / Paste Engine
+│   │
+│   ├── 1.12.1 Copy selected drawing
+│   ├── 1.12.2 Serialize drawing
+│   ├── 1.12.3 Store clipboard state
+│   ├── 1.12.4 Paste drawing
+│   ├── 1.12.5 Generate new drawing ID
+│   ├── 1.12.6 Apply paste offset
+│   ├── 1.12.7 Select pasted drawing
+│   └── 1.12.8 Paste validation
+│
+├── 1.13 Delete Engine
+│   │
+│   ├── 1.13.1 Delete selected drawing
+│   ├── 1.13.2 Delete keyboard shortcut
+│   ├── 1.13.3 Delete validation
+│   ├── 1.13.4 Clear selection
+│   └── 1.13.5 Redraw
+│
+├── 1.14 Keyboard Interaction
+│   │
+│   ├── 1.14.1 Delete / Backspace
+│   ├── 1.14.2 Ctrl+C
+│   ├── 1.14.3 Ctrl+V
+│   ├── 1.14.4 Escape
+│   ├── 1.14.5 Ctrl+Z
+│   ├── 1.14.6 Ctrl+Shift+Z
+│   └── 1.14.7 Modifier combinations
+│
+├── 1.15 Undo / Redo Transaction Integration
+│   │
+│   ├── 1.15.1 Drawing creation transaction
+│   ├── 1.15.2 Movement transaction
+│   ├── 1.15.3 Resize transaction
+│   ├── 1.15.4 Delete transaction
+│   ├── 1.15.5 Paste transaction
+│   ├── 1.15.6 Group mouse-motion events
+│   └── 1.15.7 Restore selection state
+│
+├── 1.16 Canvas Rendering / Interaction Overlay
+│   │
+│   ├── 1.16.1 Drawing rendering
+│   ├── 1.16.2 Ghost rendering
+│   ├── 1.16.3 Selection rendering
+│   ├── 1.16.4 Handle rendering
+│   ├── 1.16.5 Drag preview rendering
+│   └── 1.16.6 Crosshair integration
+│
+├── 1.17 Session Integration
+│   │
+│   ├── 1.17.1 Drawing state preservation
+│   ├── 1.17.2 Selection state handling
+│   ├── 1.17.3 Copy/paste state handling
+│   ├── 1.17.4 Load session
+│   └── 1.17.5 Rebuild interaction state
+│
+└── 1.18 Verification / Acceptance Tests
+    │
+    ├── 1.18.1 Draw Line
+    │   ├── 1.18.1.1 First click
+    │   ├── 1.18.1.2 Ghost follows mouse
+    │   ├── 1.18.1.3 Second click
+    │   └── 1.18.1.4 Line committed
+    │
+    ├── 1.18.2 Select Line
+    │   ├── 1.18.2.1 Body click
+    │   ├── 1.18.2.2 All markers visible
+    │   └── 1.18.2.3 Empty click hides markers
+    │
+    ├── 1.18.3 Move Line
+    │   ├── 1.18.3.1 Body drag
+    │   ├── 1.18.3.2 Both endpoints move
+    │   └── 1.18.3.3 Relative geometry preserved
+    │
+    ├── 1.18.4 Resize Line
+    │   ├── 1.18.4.1 Start endpoint
+    │   ├── 1.18.4.2 End endpoint
+    │   └── 1.18.4.3 Middle handles
+    │
+    ├── 1.18.5 Copy / Paste
+    │   ├── 1.18.5.1 Select
+    │   ├── 1.18.5.2 Copy
+    │   ├── 1.18.5.3 Paste
+    │   └── 1.18.5.4 New object selected
+    │
+    ├── 1.18.6 Delete
+    │   ├── 1.18.6.1 Select
+    │   ├── 1.18.6.2 Delete
+    │   └── 1.18.6.3 Drawing removed
+    │
+    ├── 1.18.7 Zoom / Pan Stability
+    │   ├── 1.18.7.1 Select before zoom
+    │   ├── 1.18.7.2 Zoom
+    │   ├── 1.18.7.3 Pan
+    │   └── 1.18.7.4 Handles remain aligned
+    │
+    ├── 1.18.8 Timeframe Stability
+    │   ├── 1.18.8.1 1m
+    │   ├── 1.18.8.2 5m
+    │   ├── 1.18.8.3 1D
+    │   └── 1.18.8.4 Coordinate preservation
+    │
+    └── 1.18.9 Undo / Redo
+        ├── 1.18.9.1 Create
+        ├── 1.18.9.2 Move
+        ├── 1.18.9.3 Resize
+        ├── 1.18.9.4 Delete
+        └── 1.18.9.5 Paste
+Notes
+1.1 Foundation
+ ↓
+1.2 Coordinates
+ ↓
+1.3 Tool Controller
+ ↓
+1.4 Drawing Creation
+ ↓
+1.6 Hit Testing
+ ↓
+1.5 Selection
+ ↓
+1.7 Handles
+ ↓
+1.8 Line Interaction
+ ↓
+1.9 Other Shapes
+ ↓
+1.10 Move
+ ↓
+1.11 Resize
+ ↓
+1.12 Copy/Paste
+ ↓
+1.13 Delete
+ ↓
+1.14 Keyboard
+ ↓
+1.15 Undo/Redo
+ ↓
+1.16 Rendering
+ ↓
+1.17 Session
+ ↓
+1.18 Acceptance Tests
